@@ -43,10 +43,82 @@
     contentFreshForSongId: null,
     contentRefreshPending: false,
     visualRafId: null,
+    noteEditorBar: null,
+    noteEditorSaving: false,
   };
 
   function setStatus(id, text) {
     el(id).textContent = text;
+  }
+
+  function closeTimelineNoteEditor() {
+    state.noteEditorBar = null;
+    if (el('timelineNoteEditor')) {
+      el('timelineNoteEditor').classList.add('hidden');
+    }
+    if (el('timelineSharedNoteInput')) {
+      el('timelineSharedNoteInput').value = '';
+    }
+    if (el('timelinePrivateNoteInput')) {
+      el('timelinePrivateNoteInput').value = '';
+    }
+    if (el('timelineNoteSaveBtn')) {
+      el('timelineNoteSaveBtn').disabled = false;
+    }
+  }
+
+  function openTimelineNoteEditor(barNumber) {
+    if (!state.songId || !barNumber || barNumber < 1) {
+      return;
+    }
+    state.noteEditorBar = barNumber;
+    if (el('timelineNoteEditorTitle')) {
+      el('timelineNoteEditorTitle').textContent = 'Edit notes for bar ' + barNumber;
+    }
+    if (el('timelineSharedNoteInput')) {
+      el('timelineSharedNoteInput').value = findNote(state.sharedNotes, barNumber);
+    }
+    if (el('timelinePrivateNoteInput')) {
+      el('timelinePrivateNoteInput').value = findNote(state.privateNotes, barNumber);
+    }
+    if (el('timelineNoteEditor')) {
+      el('timelineNoteEditor').classList.remove('hidden');
+    }
+  }
+
+  async function saveTimelineNoteEditor() {
+    if (state.noteEditorSaving || !state.songId || !state.noteEditorBar) {
+      return;
+    }
+    state.noteEditorSaving = true;
+    if (el('timelineNoteSaveBtn')) {
+      el('timelineNoteSaveBtn').disabled = true;
+    }
+    try {
+      var barNumber = state.noteEditorBar;
+      var sharedText = el('timelineSharedNoteInput') ? el('timelineSharedNoteInput').value : '';
+      var privateText = el('timelinePrivateNoteInput') ? el('timelinePrivateNoteInput').value : '';
+      await api('bar-note-shared-upsert.php', 'POST', {
+        songId: state.songId,
+        barNumber: barNumber,
+        noteText: sharedText,
+      });
+      await api('bar-note-private-upsert.php', 'POST', {
+        songId: state.songId,
+        barNumber: barNumber,
+        noteText: privateText,
+      });
+      await refreshSongContent();
+      closeTimelineNoteEditor();
+      setStatus('pageStatus', 'Notes saved for bar ' + barNumber + '.');
+    } catch (err) {
+      setStatus('pageStatus', err.message || String(err));
+      if (el('timelineNoteSaveBtn')) {
+        el('timelineNoteSaveBtn').disabled = false;
+      }
+    } finally {
+      state.noteEditorSaving = false;
+    }
   }
 
   function stampTransport(transport) {
@@ -377,13 +449,13 @@
       railStyle +
       '>' +
       sectionHeader +
-      '<div><div class="timelineBarNum">Bar ' +
+      '<div><div class="timelineBarNum">' +
       barNumber +
       '</div></div>' +
-      '<div class="timelineNote">' +
+      '<div class="timelineNote timelineNoteShared">' +
       escapeHtml(shared) +
       '</div>' +
-      '<div class="timelineNote">' +
+      '<div class="timelineNote timelineNotePrivate">' +
       escapeHtml(privateNote) +
       '</div></div>'
     );
@@ -574,6 +646,20 @@
         }
       });
     }
+
+    if (el('timelineTrack')) {
+      el('timelineTrack').addEventListener('dblclick', function (event) {
+        var barNode = event.target.closest('.timelineBar');
+        if (!barNode) {
+          return;
+        }
+        var barNumber = Number(barNode.getAttribute('data-bar-number'));
+        if (!(barNumber > 0)) {
+          return;
+        }
+        openTimelineNoteEditor(barNumber);
+      });
+    }
   }
 
   function getSongEndBar() {
@@ -658,6 +744,7 @@
     state.endPromptShownForSongId = null;
     state.autoPauseRequestedForSongId = null;
     state.contentFreshForSongId = null;
+    closeTimelineNoteEditor();
     if (window.history && window.history.replaceState) {
       var nextUrl = 'rehearsal.php?sessionId=' + state.sessionId;
       if (state.songId) {
@@ -797,6 +884,7 @@
       state.sharedNotes = [];
       state.privateNotes = [];
       state.transport = null;
+      closeTimelineNoteEditor();
       setSessionContentVisible(false);
       if (window.history && window.history.replaceState) {
         window.history.replaceState({}, '', 'rehearsal.php');
@@ -961,6 +1049,18 @@
         playNextSong().catch(function (e) {
           setStatus('pageStatus', e.message || String(e));
         });
+      });
+    }
+    if (el('timelineNoteSaveBtn')) {
+      el('timelineNoteSaveBtn').addEventListener('click', function () {
+        saveTimelineNoteEditor().catch(function (e) {
+          setStatus('pageStatus', e.message || String(e));
+        });
+      });
+    }
+    if (el('timelineNoteCancelBtn')) {
+      el('timelineNoteCancelBtn').addEventListener('click', function () {
+        closeTimelineNoteEditor();
       });
     }
   }

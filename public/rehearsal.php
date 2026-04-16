@@ -80,6 +80,23 @@
             <div id="timelineTrack" class="timelineTrack"></div>
           </div>
         </div>
+        <div id="timelineNoteEditor" class="timelineNoteEditor hidden">
+          <p id="timelineNoteEditorTitle" class="status">Edit notes</p>
+          <div class="grid2">
+            <div>
+              <label for="timelineSharedNoteInput">Shared</label>
+              <textarea id="timelineSharedNoteInput" rows="3" placeholder="Shared note"></textarea>
+            </div>
+            <div>
+              <label for="timelinePrivateNoteInput">My private</label>
+              <textarea id="timelinePrivateNoteInput" rows="3" placeholder="Private note"></textarea>
+            </div>
+          </div>
+          <div class="row compactRow">
+            <button type="button" id="timelineNoteSaveBtn">Save notes</button>
+            <button type="button" id="timelineNoteCancelBtn">Cancel</button>
+          </div>
+        </div>
         <div id="endOfSongPrompt" class="endOfSongPrompt hidden">
           <p id="endOfSongMessage" class="status">Song finished.</p>
           <div class="row">
