@@ -38,9 +38,11 @@
     endPromptShownForSongId: null,
     autoPauseRequestedForSongId: null,
     contentPollId: null,
-    contentPollDelayMs: 2000,
+    contentPollDelayMsPlaying: 2500,
+    contentPollDelayMsPaused: 10000,
     contentFreshForSongId: null,
     contentRefreshPending: false,
+    visualRafId: null,
   };
 
   function setStatus(id, text) {
@@ -141,28 +143,6 @@
         );
       })
       .join('');
-
-    Array.prototype.forEach.call(
-      el('rehearsalList').querySelectorAll('.rehearsalOpenBtn'),
-      function (button) {
-        button.addEventListener('click', function () {
-          var nextSessionId = Number(button.getAttribute('data-session-id'));
-          var nextSongId = Number(button.getAttribute('data-song-id')) || '';
-          window.location.href =
-            'rehearsal.php?sessionId=' + nextSessionId + (nextSongId ? '&songId=' + nextSongId : '');
-        });
-      }
-    );
-    Array.prototype.forEach.call(
-      el('rehearsalList').querySelectorAll('.rehearsalDeleteBtn'),
-      function (button) {
-        button.addEventListener('click', function () {
-          deleteRehearsal(Number(button.getAttribute('data-session-id'))).catch(function (e) {
-            setStatus('pageStatus', e.message || String(e));
-          });
-        });
-      }
-    );
   }
 
   function renderNotesLists() {
@@ -224,42 +204,6 @@
         );
       })
       .join('');
-
-    Array.prototype.forEach.call(
-      el('setlistList').querySelectorAll('.setlistSelectBtn'),
-      function (button) {
-        button.addEventListener('click', function () {
-          var nextSongId = Number(button.getAttribute('data-song-id'));
-          if (nextSongId === state.songId) return;
-          selectActiveSong(nextSongId).catch(function (e) {
-            setStatus('pageStatus', e.message || String(e));
-          });
-        });
-      }
-    );
-    Array.prototype.forEach.call(
-      el('setlistList').querySelectorAll('.setlistMoveBtn'),
-      function (button) {
-        button.addEventListener('click', function () {
-          reorderSetlistSong(
-            Number(button.getAttribute('data-song-id')),
-            button.getAttribute('data-direction')
-          ).catch(function (e) {
-            setStatus('pageStatus', e.message || String(e));
-          });
-        });
-      }
-    );
-    Array.prototype.forEach.call(
-      el('setlistList').querySelectorAll('.setlistRemoveBtn'),
-      function (button) {
-        button.addEventListener('click', function () {
-          removeSetlistSong(Number(button.getAttribute('data-song-id'))).catch(function (e) {
-            setStatus('pageStatus', e.message || String(e));
-          });
-        });
-      }
-    );
 
     if (el('activeSongInfo')) {
       if (state.activeSong) {
@@ -398,50 +342,62 @@
   }
 
   function renderTimelineRows() {
-    if (!el('timelineTrack')) return;
+    var track = el('timelineTrack');
+    if (!track) return;
     if (state.timelineBars.length === 0) buildTimelineBars();
-    var currentBar = Math.max(1, Math.floor(computeBarNow(state.transport)));
-    el('timelineTrack').innerHTML = state.timelineBars
-      .map(function (barNumber) {
-        var section = findSectionForBar(barNumber);
-        var sectionLabel = section ? section.label : '';
-        var sectionColor = section && section.colorHex ? section.colorHex : '#2B7CFF';
-        var sectionStart = section && Number(section.barStart) === barNumber;
-        var shared = findNote(state.sharedNotes, barNumber);
-        var privateNote = findNote(state.privateNotes, barNumber);
-        var activeClass = barNumber === currentBar ? ' timelineBarCurrent' : '';
-        var railClass = section ? ' timelineBarSection' : '';
-        var railStyle = section
-          ? ' style="--section-color:' + escapeHtml(sectionColor) + ';"'
-          : '';
-        var sectionHeader = sectionStart
-          ? '<div class="timelineSectionHeader" style="background:' +
-            escapeHtml(sectionColor) +
-            ';">' +
-            escapeHtml(sectionLabel) +
-            '</div>'
-          : '';
-        return (
-          '<div class="timelineBar' +
-          activeClass +
-          railClass +
-          '"' +
-          railStyle +
-          '>' +
-          sectionHeader +
-          '<div><div class="timelineBarNum">Bar ' +
-          barNumber +
-          '</div></div>' +
-          '<div class="timelineNote">' +
-          escapeHtml(shared) +
-          '</div>' +
-          '<div class="timelineNote">' +
-          escapeHtml(privateNote) +
-          '</div></div>'
-        );
-      })
-      .join('');
+    track.innerHTML = '';
+    appendTimelineBars(1, state.timelineBars.length);
     renderTimelinePosition();
+  }
+
+  function buildTimelineBarMarkup(barNumber, currentBar) {
+    var section = findSectionForBar(barNumber);
+    var sectionLabel = section ? section.label : '';
+    var sectionColor = section && section.colorHex ? section.colorHex : '#2B7CFF';
+    var sectionStart = section && Number(section.barStart) === barNumber;
+    var shared = findNote(state.sharedNotes, barNumber);
+    var privateNote = findNote(state.privateNotes, barNumber);
+    var activeClass = barNumber === currentBar ? ' timelineBarCurrent' : '';
+    var railClass = section ? ' timelineBarSection' : '';
+    var railStyle = section ? ' style="--section-color:' + escapeHtml(sectionColor) + ';"' : '';
+    var sectionHeader = sectionStart
+      ? '<div class="timelineSectionHeader" style="background:' +
+        escapeHtml(sectionColor) +
+        ';">' +
+        escapeHtml(sectionLabel) +
+        '</div>'
+      : '';
+    return (
+      '<div class="timelineBar' +
+      activeClass +
+      railClass +
+      '" data-bar-number="' +
+      barNumber +
+      '"' +
+      railStyle +
+      '>' +
+      sectionHeader +
+      '<div><div class="timelineBarNum">Bar ' +
+      barNumber +
+      '</div></div>' +
+      '<div class="timelineNote">' +
+      escapeHtml(shared) +
+      '</div>' +
+      '<div class="timelineNote">' +
+      escapeHtml(privateNote) +
+      '</div></div>'
+    );
+  }
+
+  function appendTimelineBars(startBar, endBar) {
+    var track = el('timelineTrack');
+    if (!track || endBar < startBar) return;
+    var currentBar = Math.max(1, Math.floor(computeBarNow(state.transport)));
+    var html = [];
+    for (var bar = startBar; bar <= endBar; bar++) {
+      html.push(buildTimelineBarMarkup(bar, currentBar));
+    }
+    track.insertAdjacentHTML('beforeend', html.join(''));
   }
 
   function getBarPixelHeight() {
@@ -465,13 +421,15 @@
       return false;
     }
     var neededMaxBar = Math.ceil(barNumber) + 24;
-    if (state.timelineBars.length >= neededMaxBar) {
+    var previousLength = state.timelineBars.length;
+    if (previousLength >= neededMaxBar) {
       return false;
     }
-    var start = state.timelineBars.length + 1;
+    var start = previousLength + 1;
     for (var i = start; i <= neededMaxBar; i++) {
       state.timelineBars.push(i);
     }
+    appendTimelineBars(start, neededMaxBar);
     return true;
   }
 
@@ -479,8 +437,7 @@
     if (!state.transport || !el('timelineTrack')) return;
     var barNow = Math.max(1, computeBarNow(state.transport));
     if (ensureTimelineHasBar(barNow)) {
-      renderTimelineRows();
-      return;
+      // New rows appended; continue with current frame positioning.
     }
     var barPixelHeight = getBarPixelHeight();
     var timelineNowY = getTimelineNowY();
@@ -494,7 +451,7 @@
     var currentBar = Math.max(1, Math.floor(barNow));
     var previous = el('timelineTrack').querySelector('.timelineBarCurrent');
     if (previous) previous.classList.remove('timelineBarCurrent');
-    var target = el('timelineTrack').children[currentBar - 1];
+    var target = el('timelineTrack').querySelector('[data-bar-number="' + currentBar + '"]');
     if (target) target.classList.add('timelineBarCurrent');
   }
 
@@ -546,12 +503,77 @@
   }
 
   function startContentPolling() {
-    if (state.contentPollId) {
-      clearInterval(state.contentPollId);
+    if (state.contentPollId) clearTimeout(state.contentPollId);
+    var delay =
+      state.transport && state.transport.playState === 'playing'
+        ? state.contentPollDelayMsPlaying
+        : state.contentPollDelayMsPaused;
+    state.contentPollId = setTimeout(async function () {
+      await pollSongContent();
+      startContentPolling();
+    }, delay);
+  }
+
+  function startVisualLoop() {
+    if (state.visualRafId) {
+      cancelAnimationFrame(state.visualRafId);
     }
-    state.contentPollId = setInterval(function () {
-      pollSongContent();
-    }, state.contentPollDelayMs);
+    var tick = function () {
+      renderTimelinePosition();
+      state.visualRafId = requestAnimationFrame(tick);
+    };
+    state.visualRafId = requestAnimationFrame(tick);
+  }
+
+  function wireDelegatedListHandlers() {
+    if (el('rehearsalList')) {
+      el('rehearsalList').addEventListener('click', function (event) {
+        var openBtn = event.target.closest('.rehearsalOpenBtn');
+        if (openBtn) {
+          var nextSessionId = Number(openBtn.getAttribute('data-session-id'));
+          var nextSongId = Number(openBtn.getAttribute('data-song-id')) || '';
+          window.location.href =
+            'rehearsal.php?sessionId=' + nextSessionId + (nextSongId ? '&songId=' + nextSongId : '');
+          return;
+        }
+        var deleteBtn = event.target.closest('.rehearsalDeleteBtn');
+        if (deleteBtn) {
+          deleteRehearsal(Number(deleteBtn.getAttribute('data-session-id'))).catch(function (e) {
+            setStatus('pageStatus', e.message || String(e));
+          });
+        }
+      });
+    }
+
+    if (el('setlistList')) {
+      el('setlistList').addEventListener('click', function (event) {
+        var selectBtn = event.target.closest('.setlistSelectBtn');
+        if (selectBtn) {
+          var nextSongId = Number(selectBtn.getAttribute('data-song-id'));
+          if (nextSongId === state.songId) return;
+          selectActiveSong(nextSongId).catch(function (e) {
+            setStatus('pageStatus', e.message || String(e));
+          });
+          return;
+        }
+        var moveBtn = event.target.closest('.setlistMoveBtn');
+        if (moveBtn) {
+          reorderSetlistSong(
+            Number(moveBtn.getAttribute('data-song-id')),
+            moveBtn.getAttribute('data-direction')
+          ).catch(function (e) {
+            setStatus('pageStatus', e.message || String(e));
+          });
+          return;
+        }
+        var removeBtn = event.target.closest('.setlistRemoveBtn');
+        if (removeBtn) {
+          removeSetlistSong(Number(removeBtn.getAttribute('data-song-id'))).catch(function (e) {
+            setStatus('pageStatus', e.message || String(e));
+          });
+        }
+      });
+    }
   }
 
   function getSongEndBar() {
@@ -705,6 +727,7 @@
       value: value,
     }));
     renderTransport();
+    startContentPolling();
   }
 
   async function loadAvailableSongs() {
@@ -849,6 +872,7 @@
     await loadAvailableSongs();
     await loadRehearsals();
     initPanelState();
+    wireDelegatedListHandlers();
 
     if (!(sessionId > 0)) {
       setSessionContentVisible(false);
@@ -866,6 +890,7 @@
     await loadRehearsals();
     startPolling();
     startContentPolling();
+    startVisualLoop();
 
     el('playBtn').addEventListener('click', function () {
       updateTransport('play').catch(function (e) {
@@ -943,9 +968,6 @@
   setInterval(function () {
     renderTransport();
   }, 250);
-  setInterval(function () {
-    renderTimelinePosition();
-  }, 100);
 
   init();
 })();
