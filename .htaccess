@@ -1,0 +1,11 @@
+Options -Indexes
+
+RewriteEngine On
+RewriteRule ^$ /public/ [R=302,L]
+
+<FilesMatch "^(config\.php|config\.sample\.php|README\.md)$">
+  Require all denied
+</FilesMatch>
+
+RedirectMatch 403 (?i)^/db/
+RedirectMatch 403 (?i)^/docs/

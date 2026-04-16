@@ -1,0 +1,951 @@
+(function () {
+  var api = window.SharedChartsApi.api;
+  var escapeHtml = window.SharedChartsApi.escapeHtml;
+  var computeBarNow = window.SharedChartsApi.computeBarNow;
+  var requireAuth = window.SharedChartsAuth.requireAuth;
+
+  var el = function (id) {
+    return document.getElementById(id);
+  };
+
+  function qs(name) {
+    var m = new RegExp('[?&]' + name + '=([^&]*)').exec(window.location.search);
+    return m ? decodeURIComponent(m[1].replace(/\+/g, ' ')) : '';
+  }
+
+  var FALLBACK_BAR_PIXEL_HEIGHT = 64;
+  var FALLBACK_TIMELINE_NOW_Y = 120;
+  var NOW_LINE_BAR_ANCHOR = 0;
+  var PANEL_STATE_KEY = 'sharedCharts.rehearsalPanels';
+
+  var state = {
+    sessionId: null,
+    songId: null,
+    activeSong: null,
+    rehearsals: [],
+    setlist: [],
+    availableSongs: [],
+    members: [],
+    currentUser: null,
+    transport: null,
+    sections: [],
+    sharedNotes: [],
+    privateNotes: [],
+    pollingId: null,
+    pollingDelayMs: 300,
+    pollingFailures: 0,
+    timelineBars: [],
+    endPromptShownForSongId: null,
+    autoPauseRequestedForSongId: null,
+    contentPollId: null,
+    contentPollDelayMs: 2000,
+    contentFreshForSongId: null,
+    contentRefreshPending: false,
+  };
+
+  function setStatus(id, text) {
+    el(id).textContent = text;
+  }
+
+  function stampTransport(transport) {
+    if (!transport) return null;
+    transport.clientReceivedAtMs = Date.now();
+    return transport;
+  }
+
+  function getPanelState() {
+    try {
+      return JSON.parse(window.localStorage.getItem(PANEL_STATE_KEY) || '{}');
+    } catch (err) {
+      return {};
+    }
+  }
+
+  function savePanelState(nextState) {
+    window.localStorage.setItem(PANEL_STATE_KEY, JSON.stringify(nextState));
+  }
+
+  function applyPanelState(panelName, expanded) {
+    var buttonId = panelName === 'rehearsalList' ? 'toggleRehearsalListBtn' : 'toggleSetlistBtn';
+    var bodyId = panelName === 'rehearsalList' ? 'rehearsalListPanelBody' : 'setlistPanelBody';
+    var button = el(buttonId);
+    var body = el(bodyId);
+    if (!button || !body) return;
+    body.classList.toggle('hidden', !expanded);
+    button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    button.textContent = expanded ? 'Hide' : 'Show';
+  }
+
+  function wirePanelToggle(panelName) {
+    var buttonId = panelName === 'rehearsalList' ? 'toggleRehearsalListBtn' : 'toggleSetlistBtn';
+    var button = el(buttonId);
+    if (!button) return;
+    button.addEventListener('click', function () {
+      var stateMap = getPanelState();
+      var expanded = stateMap[panelName] !== false;
+      stateMap[panelName] = !expanded;
+      savePanelState(stateMap);
+      applyPanelState(panelName, !expanded);
+    });
+  }
+
+  function initPanelState() {
+    var stateMap = getPanelState();
+    applyPanelState('rehearsalList', stateMap.rehearsalList !== false);
+    applyPanelState('setlist', stateMap.setlist !== false);
+    wirePanelToggle('rehearsalList');
+    wirePanelToggle('setlist');
+  }
+
+  function setSessionContentVisible(visible) {
+    var node = el('sessionContent');
+    if (!node) return;
+    node.classList.toggle('hidden', !visible);
+  }
+
+  function renderRehearsalList() {
+    if (!el('rehearsalList')) return;
+    el('rehearsalList').innerHTML = state.rehearsals
+      .map(function (item) {
+        var active = state.sessionId === Number(item.sessionId);
+        var songInfo = item.activeSongName
+          ? escapeHtml(item.activeSongName) +
+            ' (' +
+            item.activeSongBpm +
+            ' BPM, ' +
+            item.activeSongTimeSignatureNum +
+            '/' +
+            item.activeSongTimeSignatureDen +
+            ')'
+          : 'No active song';
+        return (
+          '<li><strong>' +
+          escapeHtml(item.name) +
+          '</strong> - ' +
+          songInfo +
+          ' - ' +
+          item.memberCount +
+          ' user(s)' +
+          '<div class="listActions">' +
+          '<button type="button" class="rehearsalOpenBtn" data-session-id="' +
+          item.sessionId +
+          '" data-song-id="' +
+          (item.songId || '') +
+          '">' +
+          (active ? 'Current rehearsal' : 'Open rehearsal') +
+          '</button>' +
+          '<button type="button" class="rehearsalDeleteBtn" data-session-id="' +
+          item.sessionId +
+          '">Delete</button>' +
+          '</div></li>'
+        );
+      })
+      .join('');
+
+    Array.prototype.forEach.call(
+      el('rehearsalList').querySelectorAll('.rehearsalOpenBtn'),
+      function (button) {
+        button.addEventListener('click', function () {
+          var nextSessionId = Number(button.getAttribute('data-session-id'));
+          var nextSongId = Number(button.getAttribute('data-song-id')) || '';
+          window.location.href =
+            'rehearsal.php?sessionId=' + nextSessionId + (nextSongId ? '&songId=' + nextSongId : '');
+        });
+      }
+    );
+    Array.prototype.forEach.call(
+      el('rehearsalList').querySelectorAll('.rehearsalDeleteBtn'),
+      function (button) {
+        button.addEventListener('click', function () {
+          deleteRehearsal(Number(button.getAttribute('data-session-id'))).catch(function (e) {
+            setStatus('pageStatus', e.message || String(e));
+          });
+        });
+      }
+    );
+  }
+
+  function renderNotesLists() {
+    if (!el('sharedNotesList')) return;
+    el('sharedNotesList').innerHTML = state.sharedNotes
+      .map(function (n) {
+        return '<li><strong>Bar ' + n.barNumber + ':</strong> ' + escapeHtml(n.noteText) + '</li>';
+      })
+      .join('');
+    el('privateNotesList').innerHTML = state.privateNotes
+      .map(function (n) {
+        return '<li><strong>Bar ' + n.barNumber + ':</strong> ' + escapeHtml(n.noteText) + '</li>';
+      })
+      .join('');
+    buildTimelineBars();
+    renderTimelineRows();
+  }
+
+  function renderSetlist() {
+    if (!el('setlistList')) return;
+    el('setlistList').innerHTML = state.setlist
+      .map(function (item) {
+        var active = state.songId === Number(item.songId);
+        return (
+          '<li>' +
+          (active ? '<strong>[Active]</strong> ' : '') +
+          escapeHtml(item.name) +
+          ' (' +
+          item.bpm +
+          ' BPM, ' +
+          item.timeSignatureNum +
+          '/' +
+          item.timeSignatureDen +
+          ')' +
+          '<div class="listActions">' +
+          '<button type="button" class="setlistSelectBtn" data-song-id="' +
+          item.songId +
+          '">' +
+          (active ? 'Current song' : 'Open song') +
+          '</button>' +
+          '<button type="button" class="setlistMoveBtn" data-direction="up" data-song-id="' +
+          item.songId +
+          '"' +
+          (item.sortOrder === 0 ? ' disabled' : '') +
+          '>Up</button>' +
+          '<button type="button" class="setlistMoveBtn" data-direction="down" data-song-id="' +
+          item.songId +
+          '"' +
+          (item.sortOrder === state.setlist.length - 1 ? ' disabled' : '') +
+          '>Down</button>' +
+          '<button type="button" class="setlistRemoveBtn" data-song-id="' +
+          item.songId +
+          '">Remove</button>' +
+          '<a href="editor.php?songId=' +
+          item.songId +
+          '">Edit song</a>' +
+          '</div>' +
+          '</li>'
+        );
+      })
+      .join('');
+
+    Array.prototype.forEach.call(
+      el('setlistList').querySelectorAll('.setlistSelectBtn'),
+      function (button) {
+        button.addEventListener('click', function () {
+          var nextSongId = Number(button.getAttribute('data-song-id'));
+          if (nextSongId === state.songId) return;
+          selectActiveSong(nextSongId).catch(function (e) {
+            setStatus('pageStatus', e.message || String(e));
+          });
+        });
+      }
+    );
+    Array.prototype.forEach.call(
+      el('setlistList').querySelectorAll('.setlistMoveBtn'),
+      function (button) {
+        button.addEventListener('click', function () {
+          reorderSetlistSong(
+            Number(button.getAttribute('data-song-id')),
+            button.getAttribute('data-direction')
+          ).catch(function (e) {
+            setStatus('pageStatus', e.message || String(e));
+          });
+        });
+      }
+    );
+    Array.prototype.forEach.call(
+      el('setlistList').querySelectorAll('.setlistRemoveBtn'),
+      function (button) {
+        button.addEventListener('click', function () {
+          removeSetlistSong(Number(button.getAttribute('data-song-id'))).catch(function (e) {
+            setStatus('pageStatus', e.message || String(e));
+          });
+        });
+      }
+    );
+
+    if (el('activeSongInfo')) {
+      if (state.activeSong) {
+        el('activeSongInfo').textContent =
+          'Active song: ' +
+          state.activeSong.name +
+          ' | ' +
+          state.activeSong.bpm +
+          ' BPM | ' +
+          state.activeSong.timeSignatureNum +
+          '/' +
+          state.activeSong.timeSignatureDen;
+      } else {
+        el('activeSongInfo').textContent = 'No active song selected.';
+      }
+    }
+  }
+
+  function renderMembers() {
+    if (!el('membersList')) return;
+    el('membersList').innerHTML = state.members
+      .map(function (member) {
+        var current = state.currentUser && Number(state.currentUser.userId) === Number(member.userId);
+        return '<li>' + escapeHtml(member.displayName) + (current ? ' (you)' : '') + '</li>';
+      })
+      .join('');
+    if (el('membersInfo')) {
+      el('membersInfo').textContent =
+        state.members.length > 0
+          ? 'Users in rehearsal: ' + state.members.length
+          : 'No users currently shown.';
+    }
+  }
+
+  function renderAvailableSongs() {
+    if (!el('addSongSelect')) return;
+    var currentSongIds = {};
+    state.setlist.forEach(function (item) {
+      currentSongIds[String(item.songId)] = true;
+    });
+    var options = ['<option value="">Select song to add</option>'];
+    state.availableSongs.forEach(function (song) {
+      if (currentSongIds[String(song.id)]) return;
+      options.push(
+        '<option value="' +
+          song.id +
+          '">' +
+          escapeHtml(song.name) +
+          ' (' +
+          song.bpm +
+          ' BPM)</option>'
+      );
+    });
+    el('addSongSelect').innerHTML = options.join('');
+    if (el('newRehearsalSongSelect')) {
+      var createOptions = ['<option value="">Select first song</option>'];
+      state.availableSongs.forEach(function (song) {
+        createOptions.push(
+          '<option value="' +
+            song.id +
+            '">' +
+            escapeHtml(song.name) +
+            ' (' +
+            song.bpm +
+            ' BPM)</option>'
+        );
+      });
+      el('newRehearsalSongSelect').innerHTML = createOptions.join('');
+    }
+  }
+
+  function renderSectionsList() {
+    if (!el('sectionsList')) {
+      return;
+    }
+    el('sectionsList').innerHTML = state.sections
+      .map(function (s) {
+        var color = s.colorHex || '#2B7CFF';
+        return (
+          '<li><span class="sectionColorSwatch" style="background:' +
+          escapeHtml(color) +
+          '"></span>' +
+          escapeHtml(s.label) +
+          ': bars ' +
+          s.barStart +
+          '-' +
+          s.barEnd +
+          '</li>'
+        );
+      })
+      .join('');
+    buildTimelineBars();
+    renderTimelineRows();
+  }
+
+  function buildTimelineBars() {
+    var noteBars = state.sharedNotes
+      .map(function (n) {
+        return Number(n.barNumber);
+      })
+      .concat(
+        state.privateNotes.map(function (n) {
+          return Number(n.barNumber);
+        })
+      )
+      .filter(function (n) {
+        return Number.isFinite(n) && n > 0;
+      });
+    var sectionBars = [];
+    state.sections.forEach(function (s) {
+      sectionBars.push(Number(s.barStart), Number(s.barEnd));
+    });
+    sectionBars = sectionBars.filter(function (n) {
+      return Number.isFinite(n) && n > 0;
+    });
+    var current = Math.ceil(computeBarNow(state.transport));
+    var maxKnown = Math.max.apply(
+      null,
+      [32, current + 24].concat(noteBars, sectionBars)
+    );
+    state.timelineBars = [];
+    for (var i = 1; i <= maxKnown; i++) state.timelineBars.push(i);
+  }
+
+  function findNote(notes, barNumber) {
+    var n = notes.find(function (x) {
+      return Number(x.barNumber) === barNumber;
+    });
+    return n ? n.noteText : '';
+  }
+
+  function findSectionForBar(barNumber) {
+    return state.sections.find(function (s) {
+      return barNumber >= Number(s.barStart) && barNumber <= Number(s.barEnd);
+    });
+  }
+
+  function renderTimelineRows() {
+    if (!el('timelineTrack')) return;
+    if (state.timelineBars.length === 0) buildTimelineBars();
+    var currentBar = Math.max(1, Math.floor(computeBarNow(state.transport)));
+    el('timelineTrack').innerHTML = state.timelineBars
+      .map(function (barNumber) {
+        var section = findSectionForBar(barNumber);
+        var sectionLabel = section ? section.label : '';
+        var sectionColor = section && section.colorHex ? section.colorHex : '#2B7CFF';
+        var sectionStart = section && Number(section.barStart) === barNumber;
+        var shared = findNote(state.sharedNotes, barNumber);
+        var privateNote = findNote(state.privateNotes, barNumber);
+        var activeClass = barNumber === currentBar ? ' timelineBarCurrent' : '';
+        var railClass = section ? ' timelineBarSection' : '';
+        var railStyle = section
+          ? ' style="--section-color:' + escapeHtml(sectionColor) + ';"'
+          : '';
+        var sectionHeader = sectionStart
+          ? '<div class="timelineSectionHeader" style="background:' +
+            escapeHtml(sectionColor) +
+            ';">' +
+            escapeHtml(sectionLabel) +
+            '</div>'
+          : '';
+        return (
+          '<div class="timelineBar' +
+          activeClass +
+          railClass +
+          '"' +
+          railStyle +
+          '>' +
+          sectionHeader +
+          '<div><div class="timelineBarNum">Bar ' +
+          barNumber +
+          '</div></div>' +
+          '<div class="timelineNote">' +
+          escapeHtml(shared) +
+          '</div>' +
+          '<div class="timelineNote">' +
+          escapeHtml(privateNote) +
+          '</div></div>'
+        );
+      })
+      .join('');
+    renderTimelinePosition();
+  }
+
+  function getBarPixelHeight() {
+    var rootStyle = window.getComputedStyle(document.documentElement);
+    var cssHeight = parseFloat(rootStyle.getPropertyValue('--timeline-bar-height') || '');
+    if (Number.isFinite(cssHeight) && cssHeight > 0) {
+      return cssHeight;
+    }
+    return FALLBACK_BAR_PIXEL_HEIGHT;
+  }
+
+  function getTimelineNowY() {
+    var now = el('timelineNow');
+    if (!now) return FALLBACK_TIMELINE_NOW_Y;
+    var y = now.offsetTop;
+    return Number.isFinite(y) ? y : FALLBACK_TIMELINE_NOW_Y;
+  }
+
+  function ensureTimelineHasBar(barNumber) {
+    if (!Number.isFinite(barNumber) || barNumber < 1) {
+      return false;
+    }
+    var neededMaxBar = Math.ceil(barNumber) + 24;
+    if (state.timelineBars.length >= neededMaxBar) {
+      return false;
+    }
+    var start = state.timelineBars.length + 1;
+    for (var i = start; i <= neededMaxBar; i++) {
+      state.timelineBars.push(i);
+    }
+    return true;
+  }
+
+  function renderTimelinePosition() {
+    if (!state.transport || !el('timelineTrack')) return;
+    var barNow = Math.max(1, computeBarNow(state.transport));
+    if (ensureTimelineHasBar(barNow)) {
+      renderTimelineRows();
+      return;
+    }
+    var barPixelHeight = getBarPixelHeight();
+    var timelineNowY = getTimelineNowY();
+    var barAnchorPx = barPixelHeight * NOW_LINE_BAR_ANCHOR;
+    var translateY = timelineNowY - (barNow - 1) * barPixelHeight - barAnchorPx;
+    el('timelineTrack').style.transform = 'translateY(' + translateY + 'px)';
+    updateCurrentBarHighlight(barNow);
+  }
+
+  function updateCurrentBarHighlight(barNow) {
+    var currentBar = Math.max(1, Math.floor(barNow));
+    var previous = el('timelineTrack').querySelector('.timelineBarCurrent');
+    if (previous) previous.classList.remove('timelineBarCurrent');
+    var target = el('timelineTrack').children[currentBar - 1];
+    if (target) target.classList.add('timelineBarCurrent');
+  }
+
+  function renderTransport() {
+    if (!state.transport) return;
+    var t = state.transport;
+    setStatus(
+      'transportInfo',
+      'State: ' +
+        t.playState +
+        ' | BPM: ' +
+        t.currentBpm +
+        ' | Beats/bar: ' +
+        t.beatsPerBar +
+        ' | Bar now: ' +
+        computeBarNow(t).toFixed(2)
+    );
+    renderTimelinePosition();
+    maybeShowEndOfSongPrompt();
+  }
+
+  async function refreshSongContent() {
+    if (!state.songId || state.contentRefreshPending) {
+      return;
+    }
+    state.contentRefreshPending = true;
+    try {
+      var sectionData = await api('sections.php?songId=' + encodeURIComponent(String(state.songId)));
+      state.sections = sectionData.sections || [];
+
+      var notesData = await api('bar-notes.php?songId=' + encodeURIComponent(String(state.songId)));
+      state.sharedNotes = notesData.sharedNotes || [];
+      state.privateNotes = notesData.privateNotes || [];
+      state.contentFreshForSongId = state.songId;
+      renderSectionsList();
+      renderNotesLists();
+    } catch (err) {
+      setStatus('transportInfo', err.message || String(err));
+    } finally {
+      state.contentRefreshPending = false;
+    }
+  }
+
+  async function pollSongContent() {
+    if (!state.sessionId || !state.songId) {
+      return;
+    }
+    await refreshSongContent();
+  }
+
+  function startContentPolling() {
+    if (state.contentPollId) {
+      clearInterval(state.contentPollId);
+    }
+    state.contentPollId = setInterval(function () {
+      pollSongContent();
+    }, state.contentPollDelayMs);
+  }
+
+  function getSongEndBar() {
+    var sectionEndBars = state.sections.map(function (s) {
+      return Number(s.barEnd);
+    });
+    var noteBars = state.sharedNotes
+      .map(function (n) {
+        return Number(n.barNumber);
+      })
+      .concat(
+        state.privateNotes.map(function (n) {
+          return Number(n.barNumber);
+        })
+      );
+    var bars = sectionEndBars.concat(noteBars).filter(function (n) {
+      return Number.isFinite(n) && n > 0;
+    });
+    if (!bars.length) return null;
+    return Math.max.apply(null, bars);
+  }
+
+  function getSongCompletionBar() {
+    var endBar = getSongEndBar();
+    if (!endBar) return null;
+    return endBar + 1;
+  }
+
+  function maybeShowEndOfSongPrompt() {
+    var prompt = el('endOfSongPrompt');
+    if (!prompt || !state.songId) return;
+    var completionBar = getSongCompletionBar();
+    if (!completionBar) {
+      prompt.classList.add('hidden');
+      return;
+    }
+    var barNow = computeBarNow(state.transport);
+    if (barNow >= completionBar && state.endPromptShownForSongId !== state.songId) {
+      state.endPromptShownForSongId = state.songId;
+      prompt.classList.remove('hidden');
+      var currentIndex = state.setlist.findIndex(function (item) {
+        return Number(item.songId) === Number(state.songId);
+      });
+      var hasNext = currentIndex >= 0 && currentIndex < state.setlist.length - 1;
+      if (el('endOfSongMessage')) {
+        el('endOfSongMessage').textContent = hasNext
+          ? 'Song finished. Replay or play the next song in the setlist.'
+          : 'Song finished. Replay or stay on the last song in the setlist.';
+      }
+      if (el('nextSongBtn')) {
+        el('nextSongBtn').disabled = !hasNext;
+      }
+    }
+    if (barNow < completionBar) {
+      prompt.classList.add('hidden');
+      state.endPromptShownForSongId = null;
+    }
+  }
+
+  async function loadRehearsals() {
+    var data = await api('rehearsal-list.php');
+    state.rehearsals = data.rehearsals || [];
+    renderRehearsalList();
+  }
+
+  async function joinSession(sessionId) {
+    return api('session-join.php', 'POST', {
+      sessionId: sessionId,
+    });
+  }
+
+  async function refreshSnapshot() {
+    if (!state.sessionId) return;
+    var data = await api('session-snapshot.php?sessionId=' + encodeURIComponent(String(state.sessionId)));
+    state.transport = stampTransport(data.transport);
+    state.sections = data.sections || [];
+    state.sharedNotes = data.sharedNotes || [];
+    state.privateNotes = data.privateNotes || [];
+    state.songId = data.songId;
+    state.activeSong = data.activeSong || null;
+    state.setlist = data.setlist || [];
+    state.endPromptShownForSongId = null;
+    state.autoPauseRequestedForSongId = null;
+    state.contentFreshForSongId = null;
+    if (window.history && window.history.replaceState) {
+      var nextUrl = 'rehearsal.php?sessionId=' + state.sessionId;
+      if (state.songId) {
+        nextUrl += '&songId=' + state.songId;
+      }
+      window.history.replaceState(
+        {},
+        '',
+        nextUrl
+      );
+    }
+    if (el('editorLink')) {
+      el('editorLink').href = state.songId ? 'editor.php?songId=' + state.songId : 'songs.php';
+      el('editorLink').textContent = state.songId ? 'Open notes editor for current song' : 'Choose a song first';
+    }
+    renderTransport();
+    renderSetlist();
+    renderRehearsalList();
+    renderAvailableSongs();
+    renderSectionsList();
+    renderNotesLists();
+    buildTimelineBars();
+    renderTimelineRows();
+  }
+
+  async function refreshMembers() {
+    if (!state.sessionId) return;
+    var data = await api('session-members.php?sessionId=' + encodeURIComponent(String(state.sessionId)));
+    state.members = data.members || [];
+    renderMembers();
+  }
+
+  async function pollTransport() {
+    if (!state.sessionId) return;
+    try {
+      state.transport = stampTransport(await api(
+        'transport-state.php?sessionId=' + encodeURIComponent(String(state.sessionId))
+      ));
+      await refreshMembers();
+      await maybeAutoPauseAtSongEnd();
+      state.pollingFailures = 0;
+      state.pollingDelayMs = 300;
+      renderTransport();
+    } catch (err) {
+      state.pollingFailures += 1;
+      state.pollingDelayMs = Math.min(1500, 300 + state.pollingFailures * 200);
+      setStatus('transportInfo', err.message || String(err));
+    } finally {
+      if (state.pollingId) clearTimeout(state.pollingId);
+      state.pollingId = setTimeout(pollTransport, state.pollingDelayMs);
+    }
+  }
+
+  function startPolling() {
+    if (state.pollingId) clearTimeout(state.pollingId);
+    state.pollingDelayMs = 300;
+    state.pollingFailures = 0;
+    state.pollingId = setTimeout(pollTransport, state.pollingDelayMs);
+  }
+
+  async function updateTransport(action, value) {
+    value = value || {};
+    if (!state.sessionId) throw new Error('Missing session');
+    state.transport = stampTransport(await api('transport-update.php', 'POST', {
+      sessionId: state.sessionId,
+      action: action,
+      value: value,
+    }));
+    renderTransport();
+  }
+
+  async function loadAvailableSongs() {
+    var data = await api('song-list.php');
+    state.availableSongs = data.songs || [];
+    renderAvailableSongs();
+  }
+
+  async function selectActiveSong(songId) {
+    await api('session-song-select.php', 'POST', {
+      sessionId: state.sessionId,
+      songId: songId,
+    });
+    state.songId = songId;
+    await refreshSnapshot();
+    await refreshSongContent();
+    await refreshMembers();
+  }
+
+  async function addSongToSetlist(songId) {
+    await api('session-song-add.php', 'POST', {
+      sessionId: state.sessionId,
+      songId: songId,
+    });
+    await refreshSnapshot();
+    await loadRehearsals();
+  }
+
+  async function reorderSetlistSong(songId, direction) {
+    await api('session-song-reorder.php', 'POST', {
+      sessionId: state.sessionId,
+      songId: songId,
+      direction: direction,
+    });
+    await refreshSnapshot();
+    await loadRehearsals();
+  }
+
+  async function removeSetlistSong(songId) {
+    await api('session-song-remove.php', 'POST', {
+      sessionId: state.sessionId,
+      songId: songId,
+    });
+    await refreshSnapshot();
+    await loadRehearsals();
+  }
+
+  async function createRehearsal(songId, name) {
+    return api('session-create.php', 'POST', {
+      songId: songId,
+      name: name,
+    });
+  }
+
+  async function deleteRehearsal(sessionId) {
+    await api('session-delete.php', 'POST', {
+      sessionId: sessionId,
+    });
+    if (state.sessionId === sessionId) {
+      if (state.pollingId) clearTimeout(state.pollingId);
+      state.sessionId = null;
+      state.songId = null;
+      state.activeSong = null;
+      state.setlist = [];
+      state.members = [];
+      state.sections = [];
+      state.sharedNotes = [];
+      state.privateNotes = [];
+      state.transport = null;
+      setSessionContentVisible(false);
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState({}, '', 'rehearsal.php');
+      }
+    }
+    await loadRehearsals();
+    setStatus('pageStatus', 'Rehearsal deleted.');
+  }
+
+  async function replayCurrentSong() {
+    await updateTransport('seekBar', { bar: 1 });
+    await refreshSongContent();
+    await updateTransport('play');
+    if (el('endOfSongPrompt')) {
+      el('endOfSongPrompt').classList.add('hidden');
+    }
+    state.endPromptShownForSongId = null;
+    state.autoPauseRequestedForSongId = null;
+  }
+
+  async function seekToSongStart() {
+    await updateTransport('seekBar', { bar: 1 });
+    await refreshSongContent();
+    if (el('endOfSongPrompt')) {
+      el('endOfSongPrompt').classList.add('hidden');
+    }
+    state.endPromptShownForSongId = null;
+    state.autoPauseRequestedForSongId = null;
+  }
+
+  async function playNextSong() {
+    var currentIndex = state.setlist.findIndex(function (item) {
+      return Number(item.songId) === Number(state.songId);
+    });
+    if (currentIndex < 0 || currentIndex >= state.setlist.length - 1) {
+      throw new Error('No next song in the setlist.');
+    }
+    var next = state.setlist[currentIndex + 1];
+    await selectActiveSong(Number(next.songId));
+    await replayCurrentSong();
+  }
+
+  async function maybeAutoPauseAtSongEnd() {
+    if (!state.transport || !state.songId) return;
+    if (state.transport.playState !== 'playing') return;
+    if (state.contentFreshForSongId !== state.songId) {
+      return;
+    }
+    var completionBar = getSongCompletionBar();
+    if (!completionBar) return;
+    var barNow = computeBarNow(state.transport);
+    if (barNow < completionBar) {
+      state.autoPauseRequestedForSongId = null;
+      return;
+    }
+    if (state.autoPauseRequestedForSongId === state.songId) return;
+    state.autoPauseRequestedForSongId = state.songId;
+    state.transport = stampTransport(await api('transport-update.php', 'POST', {
+      sessionId: state.sessionId,
+      action: 'pause',
+      value: {},
+    }));
+    renderTransport();
+  }
+
+  async function init() {
+    var user = await requireAuth();
+    if (!user) return;
+    state.currentUser = user;
+
+    var sessionId = parseInt(qs('sessionId'), 10);
+    var songId = parseInt(qs('songId'), 10);
+    await loadAvailableSongs();
+    await loadRehearsals();
+    initPanelState();
+
+    if (!(sessionId > 0)) {
+      setSessionContentVisible(false);
+      setStatus('pageStatus', 'Select a rehearsal from the list or create one from Songs.');
+      return;
+    }
+    state.sessionId = sessionId;
+    state.songId = songId > 0 ? songId : null;
+    setSessionContentVisible(true);
+
+    await joinSession(state.sessionId);
+    await refreshSnapshot();
+    await refreshSongContent();
+    await refreshMembers();
+    await loadRehearsals();
+    startPolling();
+    startContentPolling();
+
+    el('playBtn').addEventListener('click', function () {
+      updateTransport('play').catch(function (e) {
+        setStatus('transportInfo', e.message);
+      });
+    });
+    el('pauseBtn').addEventListener('click', function () {
+      updateTransport('pause').catch(function (e) {
+        setStatus('transportInfo', e.message);
+      });
+    });
+    el('songStartBtn').addEventListener('click', function () {
+      seekToSongStart().catch(function (e) {
+        setStatus('transportInfo', e.message);
+      });
+    });
+    el('seekBtn').addEventListener('click', function () {
+      updateTransport('seekBar', { bar: Number(el('seekBar').value) }).catch(function (e) {
+        setStatus('transportInfo', e.message);
+      });
+    });
+    el('setBpmBtn').addEventListener('click', function () {
+      updateTransport('setBpm', { bpm: Number(el('setBpm').value) }).catch(function (e) {
+        setStatus('transportInfo', e.message);
+      });
+    });
+    if (el('addSongBtn')) {
+      el('addSongBtn').addEventListener('click', function () {
+        var newSongId = Number(el('addSongSelect').value);
+        if (!(newSongId > 0)) {
+          setStatus('pageStatus', 'Select a song to add to the setlist.');
+          return;
+        }
+        addSongToSetlist(newSongId)
+          .then(function () {
+            setStatus('pageStatus', 'Song added to setlist.');
+          })
+          .catch(function (e) {
+            setStatus('pageStatus', e.message || String(e));
+          });
+      });
+    }
+    if (el('replaySongBtn')) {
+      el('replaySongBtn').addEventListener('click', function () {
+        replayCurrentSong().catch(function (e) {
+          setStatus('pageStatus', e.message || String(e));
+        });
+      });
+    }
+    if (el('createRehearsalBtn')) {
+      el('createRehearsalBtn').addEventListener('click', function () {
+        var newSongId = Number(el('newRehearsalSongSelect').value);
+        if (!(newSongId > 0)) {
+          setStatus('pageStatus', 'Select the first song for the new rehearsal.');
+          return;
+        }
+        createRehearsal(newSongId, el('newRehearsalName').value || 'Rehearsal Session')
+          .then(function (data) {
+            window.location.href = 'rehearsal.php?sessionId=' + data.sessionId + '&songId=' + newSongId;
+          })
+          .catch(function (e) {
+            setStatus('pageStatus', e.message || String(e));
+          });
+      });
+    }
+    if (el('nextSongBtn')) {
+      el('nextSongBtn').addEventListener('click', function () {
+        playNextSong().catch(function (e) {
+          setStatus('pageStatus', e.message || String(e));
+        });
+      });
+    }
+  }
+
+  setInterval(function () {
+    renderTransport();
+  }, 250);
+  setInterval(function () {
+    renderTimelinePosition();
+  }, 100);
+
+  init();
+})();
