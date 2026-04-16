@@ -530,6 +530,11 @@
   function renderTransport() {
     if (!state.transport) return;
     var t = state.transport;
+    if (el('transportSongInfo')) {
+      el('transportSongInfo').textContent = state.activeSong
+        ? 'Song: ' + state.activeSong.name
+        : 'No active song selected.';
+    }
     setStatus(
       'transportInfo',
       'State: ' +
@@ -927,6 +932,63 @@
     await replayCurrentSong();
   }
 
+  async function playPreviousSong() {
+    var currentIndex = state.setlist.findIndex(function (item) {
+      return Number(item.songId) === Number(state.songId);
+    });
+    if (currentIndex <= 0) {
+      throw new Error('No previous song in the setlist.');
+    }
+    var previous = state.setlist[currentIndex - 1];
+    await selectActiveSong(Number(previous.songId));
+    await replayCurrentSong();
+  }
+
+  function isTypingTarget(node) {
+    if (!node) return false;
+    var tag = node.tagName ? node.tagName.toLowerCase() : '';
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || node.isContentEditable;
+  }
+
+  function wireKeyboardShortcuts() {
+    document.addEventListener('keydown', function (event) {
+      if (!state.sessionId || isTypingTarget(event.target)) {
+        return;
+      }
+      if (event.code === 'Space') {
+        event.preventDefault();
+        var action =
+          state.transport && state.transport.playState === 'playing'
+            ? 'pause'
+            : 'play';
+        updateTransport(action).catch(function (e) {
+          setStatus('transportInfo', e.message || String(e));
+        });
+        return;
+      }
+      if (event.code === 'ArrowRight') {
+        event.preventDefault();
+        playNextSong().catch(function (e) {
+          setStatus('pageStatus', e.message || String(e));
+        });
+        return;
+      }
+      if (event.code === 'ArrowLeft') {
+        event.preventDefault();
+        playPreviousSong().catch(function (e) {
+          setStatus('pageStatus', e.message || String(e));
+        });
+        return;
+      }
+      if (event.code === 'Home') {
+        event.preventDefault();
+        seekToSongStart().catch(function (e) {
+          setStatus('transportInfo', e.message || String(e));
+        });
+      }
+    });
+  }
+
   async function maybeAutoPauseAtSongEnd() {
     if (!state.transport || !state.songId) return;
     if (state.transport.playState !== 'playing') return;
@@ -979,6 +1041,7 @@
     startPolling();
     startContentPolling();
     startVisualLoop();
+    wireKeyboardShortcuts();
 
     el('playBtn').addEventListener('click', function () {
       updateTransport('play').catch(function (e) {

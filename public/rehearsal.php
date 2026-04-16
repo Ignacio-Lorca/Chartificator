@@ -73,6 +73,7 @@
           <input id="setBpm" type="number" min="30" max="300" placeholder="Set BPM">
           <button type="button" id="setBpmBtn">Apply BPM</button>
         </div>
+        <p id="transportSongInfo" class="transportSongInfo muted">No active song selected.</p>
         <p id="transportInfo" class="status"></p>
         <div class="timelineWrap">
           <div class="timelineNow">Now</div>
