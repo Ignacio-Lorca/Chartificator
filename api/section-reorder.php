@@ -85,42 +85,13 @@ foreach ($reordered as $index => $section) {
 
 $pdo->beginTransaction();
 try {
-    $tempUpdateStmt = $pdo->prepare(
-        'UPDATE bar_notes
-         SET bar_number = bar_number - :old_start + :temp_start
-         WHERE song_id = :song_id AND bar_number BETWEEN :old_start AND :old_end'
-    );
-    $finalUpdateStmt = $pdo->prepare(
-        'UPDATE bar_notes
-         SET bar_number = bar_number - :temp_start + :new_start
-         WHERE song_id = :song_id AND bar_number BETWEEN :temp_range_start AND :temp_range_end'
-    );
     $sectionUpdateStmt = $pdo->prepare(
         'UPDATE song_sections
          SET bar_start = :bar_start, bar_end = :bar_end, sort_order = :sort_order
          WHERE id = :id AND song_id = :song_id'
     );
 
-    foreach ($mapping as $item) {
-        $tempUpdateStmt->execute([
-            'song_id' => $songId,
-            'old_start' => $item['oldStart'],
-            'old_end' => $item['oldEnd'],
-            'temp_start' => $item['tempStart'],
-        ]);
-    }
-
     foreach ($mapping as $sectionKey => $item) {
-        $tempRangeStart = $item['tempStart'];
-        $tempRangeEnd = $item['tempStart'] + ($item['oldEnd'] - $item['oldStart']);
-        $finalUpdateStmt->execute([
-            'new_start' => $item['newStart'],
-            'temp_start' => $item['tempStart'],
-            'song_id' => $songId,
-            'temp_range_start' => $tempRangeStart,
-            'temp_range_end' => $tempRangeEnd,
-        ]);
-
         $sectionUpdateStmt->execute([
             'bar_start' => $item['newStart'],
             'bar_end' => $item['newEnd'],

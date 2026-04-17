@@ -295,74 +295,6 @@ function normalize_session_song_sort_order(PDO $pdo, int $sessionId): void
     }
 }
 
-function shift_shared_notes_forward(PDO $pdo, int $songId, int $fromBar, int $delta): void
-{
-    if ($delta <= 0) {
-        return;
-    }
-
-    $tempStmt = $pdo->prepare(
-        'UPDATE bar_notes
-         SET bar_number = bar_number + 1000000
-         WHERE song_id = :song_id
-           AND layer_type = "shared"
-           AND bar_number >= :from_bar'
-    );
-    $tempStmt->execute([
-        'song_id' => $songId,
-        'from_bar' => $fromBar,
-    ]);
-
-    $finalStmt = $pdo->prepare(
-        'UPDATE bar_notes
-         SET bar_number = bar_number - 1000000 + :delta
-         WHERE song_id = :song_id
-           AND layer_type = "shared"
-           AND bar_number >= :temp_from_bar'
-    );
-    $finalStmt->execute([
-        'song_id' => $songId,
-        'delta' => $delta,
-        'temp_from_bar' => 1000000 + $fromBar,
-    ]);
-}
-
-function shift_private_notes_forward(PDO $pdo, int $songId, int $ownerUserId, int $fromBar, int $delta): void
-{
-    if ($delta <= 0) {
-        return;
-    }
-
-    $tempStmt = $pdo->prepare(
-        'UPDATE bar_notes
-         SET bar_number = bar_number + 1000000
-         WHERE song_id = :song_id
-           AND layer_type = "private"
-           AND owner_user_id = :owner_user_id
-           AND bar_number >= :from_bar'
-    );
-    $tempStmt->execute([
-        'song_id' => $songId,
-        'owner_user_id' => $ownerUserId,
-        'from_bar' => $fromBar,
-    ]);
-
-    $finalStmt = $pdo->prepare(
-        'UPDATE bar_notes
-         SET bar_number = bar_number - 1000000 + :delta
-         WHERE song_id = :song_id
-           AND layer_type = "private"
-           AND owner_user_id = :owner_user_id
-           AND bar_number >= :temp_from_bar'
-    );
-    $finalStmt->execute([
-        'song_id' => $songId,
-        'owner_user_id' => $ownerUserId,
-        'delta' => $delta,
-        'temp_from_bar' => 1000000 + $fromBar,
-    ]);
-}
-
 function shift_sections_forward(PDO $pdo, int $songId, int $fromBar, int $delta): void
 {
     if ($delta <= 0) {
@@ -385,20 +317,6 @@ function shift_sections_forward(PDO $pdo, int $songId, int $fromBar, int $delta)
 
 function shift_all_song_content_forward(PDO $pdo, int $songId, int $fromBar, int $delta): void
 {
-    shift_shared_notes_forward($pdo, $songId, $fromBar, $delta);
-
-    $ownerStmt = $pdo->prepare(
-        'SELECT DISTINCT owner_user_id AS ownerUserId
-         FROM bar_notes
-         WHERE song_id = :song_id
-           AND layer_type = "private"
-           AND owner_user_id IS NOT NULL'
-    );
-    $ownerStmt->execute(['song_id' => $songId]);
-    foreach ($ownerStmt->fetchAll() as $row) {
-        shift_private_notes_forward($pdo, $songId, (int) $row['ownerUserId'], $fromBar, $delta);
-    }
-
     shift_sections_forward($pdo, $songId, $fromBar, $delta);
 }
 

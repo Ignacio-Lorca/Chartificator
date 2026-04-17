@@ -21,9 +21,8 @@
 
   var songId = 0;
   var sessionId = 0;
+  var songName = '';
   var sections = [];
-  var sharedNotes = [];
-  var privateNotes = [];
 
   function clearSectionForm() {
     el('sectionId').value = '';
@@ -31,6 +30,8 @@
     el('sectionColor').value = '#2b7cff';
     el('sectionStart').value = '';
     el('sectionEnd').value = '';
+    el('sectionSharedText').value = '';
+    el('sectionPrivateText').value = '';
   }
 
   function loadSectionIntoForm(sectionId) {
@@ -43,65 +44,8 @@
     el('sectionColor').value = (section.colorHex || '#2B7CFF').toLowerCase();
     el('sectionStart').value = section.barStart;
     el('sectionEnd').value = section.barEnd;
-  }
-
-  function setNoteStatus(kind, text) {
-    var id = kind === 'shared' ? 'sharedNoteStatus' : 'privateNoteStatus';
-    if (el(id)) {
-      el(id).textContent = text;
-    }
-  }
-
-  function clearNoteForm(kind, preserveBar) {
-    var originalId = kind === 'shared' ? 'sharedOriginalBar' : 'privateOriginalBar';
-    var textId = kind === 'shared' ? 'sharedNote' : 'privateNote';
-    if (!preserveBar) {
-      el('noteBar').value = '';
-    }
-    el(originalId).value = '';
-    el(textId).value = '';
-    setNoteStatus(kind, (kind === 'shared' ? 'Shared' : 'Private') + ' note form');
-  }
-
-  function loadNoteIntoForm(kind, barNumber) {
-    var list = kind === 'shared' ? sharedNotes : privateNotes;
-    var note = list.find(function (item) {
-      return Number(item.barNumber) === Number(barNumber);
-    });
-    if (!note) return;
-    el('noteBar').value = note.barNumber;
-    el(kind === 'shared' ? 'sharedOriginalBar' : 'privateOriginalBar').value = note.barNumber;
-    el(kind === 'shared' ? 'sharedNote' : 'privateNote').value = note.noteText;
-    setNoteStatus(kind, 'Editing ' + kind + ' note at bar ' + note.barNumber);
-  }
-
-  function renderNoteList(list, listId, kind) {
-    el(listId).innerHTML = list
-      .map(function (n) {
-        return (
-          '<li><strong>Bar ' +
-          n.barNumber +
-          ':</strong> ' +
-          escapeHtml(n.noteText) +
-          '<div class="listActions">' +
-          '<button type="button" class="noteEditBtn" data-kind="' +
-          kind +
-          '" data-bar-number="' +
-          n.barNumber +
-          '">Edit</button>' +
-          '</div></li>'
-        );
-      })
-      .join('');
-
-    Array.prototype.forEach.call(el(listId).querySelectorAll('.noteEditBtn'), function (button) {
-      button.addEventListener('click', function () {
-        loadNoteIntoForm(
-          button.getAttribute('data-kind'),
-          Number(button.getAttribute('data-bar-number'))
-        );
-      });
-    });
+    el('sectionSharedText').value = section.sharedText || '';
+    el('sectionPrivateText').value = section.privateText || '';
   }
 
   async function moveSection(sectionId, direction) {
@@ -125,12 +69,6 @@
   }
 
   async function refreshNotesAndSections() {
-    var notes = await api('bar-notes.php?songId=' + encodeURIComponent(String(songId)));
-    sharedNotes = notes.sharedNotes || [];
-    privateNotes = notes.privateNotes || [];
-    renderNoteList(sharedNotes, 'sharedNotesList', 'shared');
-    renderNoteList(privateNotes, 'privateNotesList', 'private');
-
     var sec = await api('sections.php?songId=' + encodeURIComponent(String(songId)));
     sections = sec.sections || [];
     el('sectionsList').innerHTML = sections
@@ -147,7 +85,14 @@
           s.barEnd +
           ' (' +
           escapeHtml(color) +
-          ') ' +
+          ')' +
+          '<div class="muted">' +
+          escapeHtml((s.sharedText || '').slice(0, 120) || 'No shared content') +
+          '</div>' +
+          '<div class="muted">' +
+          escapeHtml((s.privateText || '').slice(0, 120) || 'No private content') +
+          '</div>' +
+          ' ' +
           '<button type="button" class="sectionEditBtn" data-section-id="' +
           s.id +
           '">Edit</button> ' +
@@ -219,8 +164,16 @@
       return;
     }
 
+    try {
+      var song = await api('song-get.php?songId=' + encodeURIComponent(String(songId)));
+      songName = (song && song.name) || '';
+    } catch (err) {
+      songName = '';
+    }
+
+    var songDisplay = songName ? songName : 'Song ' + songId;
     el('editorStatus').textContent =
-      sessionId > 0 ? 'Song ' + songId + ' | Session ' + sessionId : 'Song ' + songId;
+      sessionId > 0 ? 'Song: ' + songDisplay + ' | Session ' + sessionId : 'Song: ' + songDisplay;
     if (el('backLink')) {
       el('backLink').href =
         sessionId > 0
@@ -230,6 +183,9 @@
     }
     if (el('songLink')) {
       el('songLink').href = 'songs.php?songId=' + songId;
+      if (songName) {
+        el('songLink').textContent = 'Open song details (' + songName + ')';
+      }
     }
 
     try {
@@ -240,78 +196,6 @@
       return;
     }
 
-    el('saveSharedNoteBtn').addEventListener('click', async function () {
-      try {
-        var nextBar = Number(el('noteBar').value);
-        var originalBar = Number(el('sharedOriginalBar').value);
-        var sharedResult = await api('bar-note-shared-upsert.php', 'POST', {
-          songId: songId,
-          barNumber: nextBar,
-          originalBarNumber: originalBar > 0 ? originalBar : undefined,
-          noteText: el('sharedNote').value,
-        });
-        clearNoteForm('shared');
-        await refreshNotesAndSections();
-        if (
-          sharedResult &&
-          Number(sharedResult.movedFromBarNumber) > 0 &&
-          Number(sharedResult.movedToBarNumber) > 0 &&
-          Number(sharedResult.movedFromBarNumber) !== Number(sharedResult.movedToBarNumber)
-        ) {
-          notify(
-            'Shared note moved from bar ' +
-              sharedResult.movedFromBarNumber +
-              ' to bar ' +
-              sharedResult.movedToBarNumber +
-              '.',
-            'info'
-          );
-        }
-        notify('Shared note saved.', 'success');
-      } catch (err) {
-        notify(err.message || String(err), 'error');
-      }
-    });
-
-    el('savePrivateNoteBtn').addEventListener('click', async function () {
-      try {
-        var nextBar = Number(el('noteBar').value);
-        var originalBar = Number(el('privateOriginalBar').value);
-        var privateResult = await api('bar-note-private-upsert.php', 'POST', {
-          songId: songId,
-          barNumber: nextBar,
-          originalBarNumber: originalBar > 0 ? originalBar : undefined,
-          noteText: el('privateNote').value,
-        });
-        clearNoteForm('private');
-        await refreshNotesAndSections();
-        if (
-          privateResult &&
-          Number(privateResult.movedFromBarNumber) > 0 &&
-          Number(privateResult.movedToBarNumber) > 0 &&
-          Number(privateResult.movedFromBarNumber) !== Number(privateResult.movedToBarNumber)
-        ) {
-          notify(
-            'Private note moved from bar ' +
-              privateResult.movedFromBarNumber +
-              ' to bar ' +
-              privateResult.movedToBarNumber +
-              '.',
-            'info'
-          );
-        }
-        notify('Private note saved.', 'success');
-      } catch (err) {
-        notify(err.message || String(err), 'error');
-      }
-    });
-    el('clearSharedNoteBtn').addEventListener('click', function () {
-      clearNoteForm('shared', false);
-    });
-    el('clearPrivateNoteBtn').addEventListener('click', function () {
-      clearNoteForm('private', false);
-    });
-
     el('saveSectionBtn').addEventListener('click', async function () {
       try {
         await api('section-upsert.php', 'POST', {
@@ -321,6 +205,8 @@
           colorHex: (el('sectionColor').value || '#2b7cff').toUpperCase(),
           barStart: Number(el('sectionStart').value),
           barEnd: Number(el('sectionEnd').value),
+          sharedText: el('sectionSharedText').value,
+          privateText: el('sectionPrivateText').value,
         });
         clearSectionForm();
         await refreshNotesAndSections();
@@ -332,8 +218,6 @@
     el('clearSectionBtn').addEventListener('click', function () {
       clearSectionForm();
     });
-    clearNoteForm('shared', true);
-    clearNoteForm('private', true);
   }
 
   init();

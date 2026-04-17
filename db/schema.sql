@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS song_sections (
   song_id BIGINT UNSIGNED NOT NULL,
   label VARCHAR(40) NOT NULL,
   color_hex VARCHAR(7) NOT NULL DEFAULT '#2B7CFF',
+  shared_text TEXT NOT NULL,
   bar_start INT UNSIGNED NOT NULL,
   bar_end INT UNSIGNED NOT NULL,
   sort_order INT NOT NULL DEFAULT 0,
@@ -70,8 +71,22 @@ CREATE TABLE IF NOT EXISTS song_sections (
   FOREIGN KEY (song_id) REFERENCES songs(id)
 );
 
+CREATE TABLE IF NOT EXISTS song_section_private_notes (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  section_id BIGINT UNSIGNED NOT NULL,
+  owner_user_id BIGINT UNSIGNED NOT NULL,
+  note_text TEXT NOT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_section_owner (section_id, owner_user_id),
+  KEY idx_owner_section (owner_user_id, section_id),
+  FOREIGN KEY (section_id) REFERENCES song_sections(id) ON DELETE CASCADE,
+  FOREIGN KEY (owner_user_id) REFERENCES users(id)
+);
+
 -- Migration note for existing deployments:
 -- ALTER TABLE song_sections ADD COLUMN color_hex VARCHAR(7) NOT NULL DEFAULT '#2B7CFF' AFTER label;
+-- ALTER TABLE song_sections ADD COLUMN shared_text TEXT NOT NULL AFTER color_hex;
+-- CREATE TABLE song_section_private_notes (...);
 -- ALTER TABLE sessions ADD COLUMN active_song_id BIGINT UNSIGNED NULL AFTER song_id;
 -- CREATE TABLE session_songs (...);
 -- INSERT INTO session_songs (session_id, song_id, sort_order)

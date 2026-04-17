@@ -52,44 +52,22 @@ if ($songId !== null) {
 $sections = [];
 if ($songId !== null) {
     $sectionStmt = $pdo->prepare(
-        'SELECT id, label, color_hex AS colorHex, bar_start AS barStart, bar_end AS barEnd, sort_order AS sortOrder
-         FROM song_sections
+        'SELECT ss.id, ss.label, ss.color_hex AS colorHex, ss.shared_text AS sharedText,
+                ss.bar_start AS barStart, ss.bar_end AS barEnd, ss.sort_order AS sortOrder,
+                COALESCE(spn.note_text, "") AS privateText
+         FROM song_sections ss
+         LEFT JOIN song_section_private_notes spn
+                ON spn.section_id = ss.id AND spn.owner_user_id = :owner_user_id
          WHERE song_id = :song_id
          ORDER BY sort_order ASC, bar_start ASC'
     );
-    $sectionStmt->execute(['song_id' => $songId]);
+    $sectionStmt->execute(['song_id' => $songId, 'owner_user_id' => $userId]);
     $sections = $sectionStmt->fetchAll();
-}
-
-$sharedNotes = [];
-if ($songId !== null) {
-    $sharedStmt = $pdo->prepare(
-        'SELECT bar_number AS barNumber, note_text AS noteText, updated_at AS updatedAt
-         FROM bar_notes
-         WHERE song_id = :song_id AND layer_type = "shared"
-         ORDER BY bar_number ASC'
-    );
-    $sharedStmt->execute(['song_id' => $songId]);
-    $sharedNotes = $sharedStmt->fetchAll();
-}
-
-$privateNotes = [];
-if ($songId !== null) {
-    $privateStmt = $pdo->prepare(
-        'SELECT bar_number AS barNumber, note_text AS noteText, updated_at AS updatedAt
-         FROM bar_notes
-         WHERE song_id = :song_id AND layer_type = "private" AND owner_user_id = :owner_user_id
-         ORDER BY bar_number ASC'
-    );
-    $privateStmt->execute(['song_id' => $songId, 'owner_user_id' => $userId]);
-    $privateNotes = $privateStmt->fetchAll();
 }
 
 json_ok([
     'transport' => transport_payload($session),
     'sections' => $sections,
-    'sharedNotes' => $sharedNotes,
-    'privateNotes' => $privateNotes,
     'songId' => $songId,
     'activeSong' => $activeSong ?: null,
     'setlist' => array_map(static function (array $row): array {

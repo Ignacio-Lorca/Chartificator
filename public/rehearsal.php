@@ -85,16 +85,16 @@
           <p id="timelineNoteEditorTitle" class="status">Edit notes</p>
           <div class="grid2">
             <div>
-              <label for="timelineSharedNoteInput">Shared</label>
-              <textarea id="timelineSharedNoteInput" rows="3" placeholder="Shared note"></textarea>
+              <label for="timelineSharedNoteInput">Shared section content</label>
+              <textarea id="timelineSharedNoteInput" rows="3" placeholder="Shared content for this section"></textarea>
             </div>
             <div>
-              <label for="timelinePrivateNoteInput">My private</label>
-              <textarea id="timelinePrivateNoteInput" rows="3" placeholder="Private note"></textarea>
+              <label for="timelinePrivateNoteInput">My private section content</label>
+              <textarea id="timelinePrivateNoteInput" rows="3" placeholder="Private content for this section"></textarea>
             </div>
           </div>
           <div class="row compactRow">
-            <button type="button" id="timelineNoteSaveBtn">Save notes</button>
+            <button type="button" id="timelineNoteSaveBtn">Save section content</button>
             <button type="button" id="timelineNoteCancelBtn">Cancel</button>
           </div>
         </div>
@@ -113,7 +113,7 @@
       </section>
 
       <section class="panel">
-        <h2>Notes preview</h2>
+        <h2>Section content preview</h2>
         <div class="grid2">
           <div>
             <h3>Shared</h3>
@@ -124,7 +124,7 @@
             <ul id="privateNotesList"></ul>
           </div>
         </div>
-        <p class="muted">Edit notes on the <a href="editor.php">Editor</a> page.</p>
+        <p class="muted">Double-click a timeline bar to edit the section content, or use the <a href="editor.php">Editor</a> page.</p>
       </section>
     </div>
   </main>

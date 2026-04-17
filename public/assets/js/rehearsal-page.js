@@ -30,8 +30,6 @@
     currentUser: null,
     transport: null,
     sections: [],
-    sharedNotes: [],
-    privateNotes: [],
     pollingId: null,
     pollingDelayMs: 300,
     pollingFailures: 0,
@@ -44,7 +42,7 @@
     contentFreshForSongId: null,
     contentRefreshPending: false,
     visualRafId: null,
-    noteEditorBar: null,
+    noteEditorSectionId: null,
     noteEditorSaving: false,
     navActionInFlight: false,
     transportActionInFlight: false,
@@ -64,7 +62,7 @@
   }
 
   function closeTimelineNoteEditor() {
-    state.noteEditorBar = null;
+    state.noteEditorSectionId = null;
     if (el('timelineNoteEditor')) {
       el('timelineNoteEditor').classList.add('hidden');
     }
@@ -79,19 +77,20 @@
     }
   }
 
-  function openTimelineNoteEditor(barNumber) {
-    if (!state.songId || !barNumber || barNumber < 1) {
+  function openTimelineNoteEditor(sectionId) {
+    var section = findSectionById(sectionId);
+    if (!state.songId || !section) {
       return;
     }
-    state.noteEditorBar = barNumber;
+    state.noteEditorSectionId = Number(section.id);
     if (el('timelineNoteEditorTitle')) {
-      el('timelineNoteEditorTitle').textContent = 'Edit notes for bar ' + barNumber;
+      el('timelineNoteEditorTitle').textContent = 'Edit notes for section ' + section.label;
     }
     if (el('timelineSharedNoteInput')) {
-      el('timelineSharedNoteInput').value = findNote(state.sharedNotes, barNumber);
+      el('timelineSharedNoteInput').value = section.sharedText || '';
     }
     if (el('timelinePrivateNoteInput')) {
-      el('timelinePrivateNoteInput').value = findNote(state.privateNotes, barNumber);
+      el('timelinePrivateNoteInput').value = section.privateText || '';
     }
     if (el('timelineNoteEditor')) {
       el('timelineNoteEditor').classList.remove('hidden');
@@ -99,7 +98,7 @@
   }
 
   async function saveTimelineNoteEditor() {
-    if (state.noteEditorSaving || !state.songId || !state.noteEditorBar) {
+    if (state.noteEditorSaving || !state.songId || !state.noteEditorSectionId) {
       return;
     }
     state.noteEditorSaving = true;
@@ -107,102 +106,26 @@
       el('timelineNoteSaveBtn').disabled = true;
     }
     try {
-      var barNumber = state.noteEditorBar;
+      var section = findSectionById(state.noteEditorSectionId);
+      if (!section) {
+        throw new Error('Section not found.');
+      }
       var sharedText = el('timelineSharedNoteInput') ? el('timelineSharedNoteInput').value : '';
       var privateText = el('timelinePrivateNoteInput') ? el('timelinePrivateNoteInput').value : '';
-      var sharedOk = false;
-      var privateOk = false;
-      var sharedErr = null;
-      var privateErr = null;
-
-      try {
-        var sharedResult = await api('bar-note-shared-upsert.php', 'POST', {
-          songId: state.songId,
-          barNumber: barNumber,
-          noteText: sharedText,
-        });
-        sharedOk = true;
-        if (
-          sharedResult &&
-          Number(sharedResult.movedFromBarNumber) > 0 &&
-          Number(sharedResult.movedToBarNumber) > 0 &&
-          Number(sharedResult.movedFromBarNumber) !== Number(sharedResult.movedToBarNumber)
-        ) {
-          notify(
-            'Shared note moved from bar ' +
-              sharedResult.movedFromBarNumber +
-              ' to bar ' +
-              sharedResult.movedToBarNumber +
-              '.',
-            'info'
-          );
-        }
-      } catch (err) {
-        sharedErr = err;
-      }
-
-      try {
-        var privateResult = await api('bar-note-private-upsert.php', 'POST', {
-          songId: state.songId,
-          barNumber: barNumber,
-          noteText: privateText,
-        });
-        privateOk = true;
-        if (
-          privateResult &&
-          Number(privateResult.movedFromBarNumber) > 0 &&
-          Number(privateResult.movedToBarNumber) > 0 &&
-          Number(privateResult.movedFromBarNumber) !== Number(privateResult.movedToBarNumber)
-        ) {
-          notify(
-            'Private note moved from bar ' +
-              privateResult.movedFromBarNumber +
-              ' to bar ' +
-              privateResult.movedToBarNumber +
-              '.',
-            'info'
-          );
-        }
-      } catch (err) {
-        privateErr = err;
-      }
-
-      if (sharedOk || privateOk) {
-        await refreshSongContent();
-      }
-
-      if (sharedOk && privateOk) {
-        closeTimelineNoteEditor();
-        notify('Shared and private notes saved for bar ' + barNumber + '.', 'success');
-        return;
-      }
-      if (sharedOk && !privateOk) {
-        closeTimelineNoteEditor();
-        notify(
-          'Shared note saved, private failed: ' + ((privateErr && privateErr.message) || 'Unknown error'),
-          'error'
-        );
-        return;
-      }
-      if (!sharedOk && privateOk) {
-        closeTimelineNoteEditor();
-        notify(
-          'Private note saved, shared failed: ' + ((sharedErr && sharedErr.message) || 'Unknown error'),
-          'error'
-        );
-        return;
-      }
-
-      notify(
-        'Saving failed. Shared: ' +
-          ((sharedErr && sharedErr.message) || 'Unknown error') +
-          ' | Private: ' +
-          ((privateErr && privateErr.message) || 'Unknown error'),
-        'error'
-      );
-      if (el('timelineNoteSaveBtn')) {
-        el('timelineNoteSaveBtn').disabled = false;
-      }
+      await api('section-upsert.php', 'POST', {
+        songId: state.songId,
+        sectionId: Number(section.id),
+        label: section.label,
+        colorHex: section.colorHex || '#2B7CFF',
+        barStart: Number(section.barStart),
+        barEnd: Number(section.barEnd),
+        sortOrder: Number(section.sortOrder),
+        sharedText: sharedText,
+        privateText: privateText,
+      });
+      await refreshSongContent();
+      closeTimelineNoteEditor();
+      notify('Section notes saved.', 'success');
     } catch (err) {
       notify(err.message || String(err), 'error');
       if (el('timelineNoteSaveBtn')) {
@@ -311,14 +234,26 @@
 
   function renderNotesLists() {
     if (!el('sharedNotesList')) return;
-    el('sharedNotesList').innerHTML = state.sharedNotes
-      .map(function (n) {
-        return '<li><strong>Bar ' + n.barNumber + ':</strong> ' + escapeHtml(n.noteText) + '</li>';
+    el('sharedNotesList').innerHTML = state.sections
+      .map(function (section) {
+        return (
+          '<li><strong>' +
+          escapeHtml(section.label) +
+          ':</strong> ' +
+          escapeHtml(section.sharedText || '') +
+          '</li>'
+        );
       })
       .join('');
-    el('privateNotesList').innerHTML = state.privateNotes
-      .map(function (n) {
-        return '<li><strong>Bar ' + n.barNumber + ':</strong> ' + escapeHtml(n.noteText) + '</li>';
+    el('privateNotesList').innerHTML = state.sections
+      .map(function (section) {
+        return (
+          '<li><strong>' +
+          escapeHtml(section.label) +
+          ':</strong> ' +
+          escapeHtml(section.privateText || '') +
+          '</li>'
+        );
       })
       .join('');
     buildTimelineBars();
@@ -464,18 +399,6 @@
   }
 
   function buildTimelineBars() {
-    var noteBars = state.sharedNotes
-      .map(function (n) {
-        return Number(n.barNumber);
-      })
-      .concat(
-        state.privateNotes.map(function (n) {
-          return Number(n.barNumber);
-        })
-      )
-      .filter(function (n) {
-        return Number.isFinite(n) && n > 0;
-      });
     var sectionBars = [];
     state.sections.forEach(function (s) {
       sectionBars.push(Number(s.barStart), Number(s.barEnd));
@@ -486,22 +409,21 @@
     var current = Math.ceil(computeBarNow(state.transport));
     var maxKnown = Math.max.apply(
       null,
-      [32, current + 24].concat(noteBars, sectionBars)
+      [32, current + 24].concat(sectionBars)
     );
     state.timelineBars = [];
     for (var i = 1; i <= maxKnown; i++) state.timelineBars.push(i);
   }
 
-  function findNote(notes, barNumber) {
-    var n = notes.find(function (x) {
-      return Number(x.barNumber) === barNumber;
-    });
-    return n ? n.noteText : '';
-  }
-
   function findSectionForBar(barNumber) {
     return state.sections.find(function (s) {
       return barNumber >= Number(s.barStart) && barNumber <= Number(s.barEnd);
+    });
+  }
+
+  function findSectionById(sectionId) {
+    return state.sections.find(function (s) {
+      return Number(s.id) === Number(sectionId);
     });
   }
 
@@ -511,26 +433,18 @@
     if (state.timelineBars.length === 0) buildTimelineBars();
     track.innerHTML = '';
     appendTimelineBars(1, state.timelineBars.length);
+    renderTimelineSectionBlocks();
     renderTimelinePosition();
   }
 
   function buildTimelineBarMarkup(barNumber, currentBar) {
     var section = findSectionForBar(barNumber);
-    var sectionLabel = section ? section.label : '';
     var sectionColor = section && section.colorHex ? section.colorHex : '#2B7CFF';
     var sectionStart = section && Number(section.barStart) === barNumber;
-    var shared = findNote(state.sharedNotes, barNumber);
-    var privateNote = findNote(state.privateNotes, barNumber);
     var activeClass = barNumber === currentBar ? ' timelineBarCurrent' : '';
     var railClass = section ? ' timelineBarSection' : '';
     var railStyle = section ? ' style="--section-color:' + escapeHtml(sectionColor) + ';"' : '';
-    var sectionHeader = sectionStart
-      ? '<div class="timelineSectionHeader" style="background:' +
-        escapeHtml(sectionColor) +
-        ';">' +
-        escapeHtml(sectionLabel) +
-        '</div>'
-      : '';
+    var sectionHeader = sectionStart ? '<div class="timelineSectionStartMarker"></div>' : '';
     return (
       '<div class="timelineBar' +
       activeClass +
@@ -541,15 +455,64 @@
       railStyle +
       '>' +
       sectionHeader +
-      '<div><div class="timelineBarNum">' +
+      '<div class="timelineBarNum">' +
       barNumber +
-      '</div></div>' +
-      '<div class="timelineNote timelineNoteShared">' +
-      escapeHtml(shared) +
       '</div>' +
-      '<div class="timelineNote timelineNotePrivate">' +
-      escapeHtml(privateNote) +
-      '</div></div>'
+      '</div>'
+    );
+  }
+
+  function renderTimelineSectionBlocks() {
+    var track = el('timelineTrack');
+    if (!track) return;
+    var barPixelHeight = getBarPixelHeight();
+    var blocksHtml = state.sections
+      .map(function (section) {
+        var startBar = Number(section.barStart);
+        var endBar = Number(section.barEnd);
+        if (!Number.isFinite(startBar) || !Number.isFinite(endBar)) {
+          return '';
+        }
+        startBar = Math.max(1, Math.floor(startBar));
+        endBar = Math.max(startBar, Math.floor(endBar));
+        var top = (startBar - 1) * barPixelHeight + 6;
+        var height = (endBar - startBar + 1) * barPixelHeight - 12;
+        var color = section.colorHex || '#2B7CFF';
+        return (
+          '<div class="timelineSectionBlock" data-section-id="' +
+          Number(section.id || 0) +
+          '" style="top:' +
+          top +
+          'px;height:' +
+          height +
+          'px;--section-color:' +
+          escapeHtml(color) +
+          ';">' +
+          '<div class="timelineSectionBlockHeader">' +
+          escapeHtml(section.label || 'Section') +
+          '</div>' +
+          '<div class="timelineSectionColumns">' +
+          '<div class="timelineSectionColumn timelineSectionColumnShared">' +
+          '<div class="timelineSectionColumnLabel">Shared</div>' +
+          '<div class="timelineSectionText">' +
+          escapeHtml(section.sharedText || '') +
+          '</div>' +
+          '</div>' +
+          '<div class="timelineSectionColumn timelineSectionColumnPrivate">' +
+          '<div class="timelineSectionColumnLabel">Private</div>' +
+          '<div class="timelineSectionText">' +
+          escapeHtml(section.privateText || '') +
+          '</div>' +
+          '</div>' +
+          '</div>' +
+          '</div>'
+        );
+      })
+      .join('');
+
+    track.insertAdjacentHTML(
+      'beforeend',
+      '<div class="timelineSectionBlocks" aria-hidden="true">' + blocksHtml + '</div>'
     );
   }
 
@@ -650,10 +613,6 @@
     try {
       var sectionData = await api('sections.php?songId=' + encodeURIComponent(String(state.songId)));
       state.sections = sectionData.sections || [];
-
-      var notesData = await api('bar-notes.php?songId=' + encodeURIComponent(String(state.songId)));
-      state.sharedNotes = notesData.sharedNotes || [];
-      state.privateNotes = notesData.privateNotes || [];
       state.contentFreshForSongId = state.songId;
       renderSectionsList();
       renderNotesLists();
@@ -686,8 +645,6 @@
     state.setlist = snapshot.setlist || [];
     if (songChanged) {
       state.sections = snapshot.sections || [];
-      state.sharedNotes = snapshot.sharedNotes || [];
-      state.privateNotes = snapshot.privateNotes || [];
       state.contentFreshForSongId = state.songId;
       if (window.history && window.history.replaceState) {
         var nextUrl = 'rehearsal.php?sessionId=' + state.sessionId;
@@ -789,6 +746,14 @@
 
     if (el('timelineTrack')) {
       el('timelineTrack').addEventListener('dblclick', function (event) {
+        var sectionBlockNode = event.target.closest('.timelineSectionBlock');
+        if (sectionBlockNode) {
+          var sectionId = Number(sectionBlockNode.getAttribute('data-section-id'));
+          if (sectionId > 0) {
+            openTimelineNoteEditor(sectionId);
+          }
+          return;
+        }
         var barNode = event.target.closest('.timelineBar');
         if (!barNode) {
           return;
@@ -797,7 +762,11 @@
         if (!(barNumber > 0)) {
           return;
         }
-        openTimelineNoteEditor(barNumber);
+        var section = findSectionForBar(barNumber);
+        if (!section) {
+          return;
+        }
+        openTimelineNoteEditor(Number(section.id));
       });
     }
   }
@@ -806,16 +775,7 @@
     var sectionEndBars = state.sections.map(function (s) {
       return Number(s.barEnd);
     });
-    var noteBars = state.sharedNotes
-      .map(function (n) {
-        return Number(n.barNumber);
-      })
-      .concat(
-        state.privateNotes.map(function (n) {
-          return Number(n.barNumber);
-        })
-      );
-    var bars = sectionEndBars.concat(noteBars).filter(function (n) {
+    var bars = sectionEndBars.filter(function (n) {
       return Number.isFinite(n) && n > 0;
     });
     if (!bars.length) return null;
@@ -876,8 +836,6 @@
     var data = await api('session-snapshot.php?sessionId=' + encodeURIComponent(String(state.sessionId)));
     state.transport = stampTransport(data.transport);
     state.sections = data.sections || [];
-    state.sharedNotes = data.sharedNotes || [];
-    state.privateNotes = data.privateNotes || [];
     state.songId = data.songId;
     state.activeSong = data.activeSong || null;
     state.setlist = data.setlist || [];
@@ -1023,8 +981,6 @@
       state.setlist = [];
       state.members = [];
       state.sections = [];
-      state.sharedNotes = [];
-      state.privateNotes = [];
       state.transport = null;
       closeTimelineNoteEditor();
       setSessionContentVisible(false);

@@ -90,6 +90,13 @@ h1 {
   margin-bottom: 14px;
 }
 
+#editorStatus {
+  font-size: clamp(2rem, 3vw, 2.6rem);
+  color: var(--heading);
+  letter-spacing: -0.02em;
+  margin: 0 0 14px;
+}
+
 h2 {
   font-size: 1.2rem;
   margin-bottom: 10px;
@@ -507,11 +514,9 @@ li {
   height: var(--timeline-bar-height);
   min-height: var(--timeline-bar-height);
   border-bottom: 1px solid var(--border);
-  padding: 28px 10px 8px 14px;
-  display: grid;
-  grid-template-columns: minmax(34px, 46px) minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
+  padding: 8px 10px 8px 14px;
+  display: flex;
+  align-items: flex-start;
   transition: background-color 120ms linear;
   position: relative;
   overflow: hidden;
@@ -543,63 +548,95 @@ li {
   font-weight: 500;
   font-size: 13px;
   color: var(--heading);
+  opacity: 0.8;
 }
 
-.timelineLabel {
-  color: var(--text-muted);
-  font-size: 16px;
-  font-weight: 500;
-}
-
-.timelineSectionHeader {
+.timelineSectionStartMarker {
   position: absolute;
-  top: 6px;
-  left: 18px;
-  color: #ffffff;
+  top: 0;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 0 0 999px 0;
+  background: var(--section-color, var(--accent));
+}
+
+.timelineSectionBlocks {
+  position: absolute;
+  top: 0;
+  left: 52px;
+  right: 10px;
+  pointer-events: auto;
+}
+
+.timelineSectionBlock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border: 1px solid color-mix(in srgb, var(--section-color, var(--accent)) 45%, var(--border) 55%);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--section-color, var(--accent)) 10%, var(--surface-strong) 90%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  overflow: clip;
+  pointer-events: auto;
+}
+
+.timelineSectionBlockHeader {
+  background: var(--section-color, var(--accent));
+  color: #fff;
   font-size: 11px;
   font-weight: 700;
   line-height: 1.2;
   padding: 4px 8px;
-  border-radius: 999px;
-  margin: 0;
-  max-width: calc(100% - 28px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  pointer-events: none;
 }
 
-.timelineNote {
-  font-size: 14px;
+.timelineSectionColumns {
+  padding: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-height: 56px;
+}
+
+.timelineSectionColumn {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.timelineSectionColumnLabel {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  opacity: 0.85;
+}
+
+.timelineSectionColumnShared .timelineSectionColumnLabel {
+  color: var(--heading);
+}
+
+.timelineSectionColumnPrivate .timelineSectionColumnLabel {
+  color: var(--accent-strong);
+}
+
+.timelineSectionText {
+  font-size: 13px;
   font-weight: 600;
-  line-height: 1.3;
-  white-space: normal;
+  line-height: 1.35;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--text-muted);
-  max-width: 100%;
 }
 
-.timelineNoteShared {
+.timelineSectionColumnShared .timelineSectionText {
   color: var(--heading);
-  background: color-mix(in srgb, var(--surface-strong) 88%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
-  border-radius: 8px;
-  padding: 4px 6px;
 }
 
-.timelineNotePrivate {
+.timelineSectionColumnPrivate .timelineSectionText {
   color: var(--accent-strong);
-  background: color-mix(in srgb, var(--accent-soft) 68%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border) 70%);
-  border-radius: 8px;
-  padding: 4px 6px;
 }
+
 
 .themeToggleButton {
   min-width: 124px;
@@ -700,9 +737,9 @@ li {
     min-width: 560px;
   }
 
-  .timelineSectionHeader {
-    left: 14px;
-    max-width: calc(100% - 24px);
+  .timelineSectionBlocks {
+    left: 44px;
+    right: 8px;
   }
 
   .timelineNow {

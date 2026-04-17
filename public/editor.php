@@ -31,44 +31,17 @@
         <button type="button" id="saveSectionBtn">Save section</button>
         <button type="button" id="clearSectionBtn">Clear section form</button>
       </div>
-      <ul id="sectionsList"></ul>
-    </section>
-
-    <section class="panel">
-      <h2>Bar notes</h2>
-      <div class="row compactRow">
-        <input id="sharedOriginalBar" type="hidden">
-        <input id="privateOriginalBar" type="hidden">
-        <input id="noteBar" type="number" min="1" placeholder="Bar number">
-      </div>
       <div class="grid2 noteEditorGrid">
         <div class="noteEditorPanel">
-          <p id="sharedNoteStatus" class="muted noteFormStatus">Shared note form</p>
-          <textarea id="sharedNote" rows="3" placeholder="Shared note"></textarea>
-          <div class="row compactRow">
-            <button type="button" id="saveSharedNoteBtn">Save shared note</button>
-            <button type="button" id="clearSharedNoteBtn">Clear shared form</button>
-          </div>
+          <p class="muted noteFormStatus">Shared section content</p>
+          <textarea id="sectionSharedText" rows="5" placeholder="Shared notes for this section"></textarea>
         </div>
         <div class="noteEditorPanel">
-          <p id="privateNoteStatus" class="muted noteFormStatus">Private note form</p>
-          <textarea id="privateNote" rows="3" placeholder="Private note"></textarea>
-          <div class="row compactRow">
-            <button type="button" id="savePrivateNoteBtn">Save private note</button>
-            <button type="button" id="clearPrivateNoteBtn">Clear private form</button>
-          </div>
+          <p class="muted noteFormStatus">My private section content</p>
+          <textarea id="sectionPrivateText" rows="5" placeholder="Private notes for this section"></textarea>
         </div>
       </div>
-      <div class="grid2">
-        <div>
-          <h3>Shared notes</h3>
-          <ul id="sharedNotesList"></ul>
-        </div>
-        <div>
-          <h3>My private notes</h3>
-          <ul id="privateNotesList"></ul>
-        </div>
-      </div>
+      <ul id="sectionsList"></ul>
     </section>
   </main>
   <script src="assets/js/api-client.js"></script>
