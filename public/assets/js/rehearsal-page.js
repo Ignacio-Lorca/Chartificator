@@ -269,6 +269,7 @@
         var active = state.songId === Number(item.songId);
         return (
           '<li>' +
+          '<div class="setlistItemMeta">' +
           (active ? '<strong>[Active]</strong> ' : '') +
           escapeHtml(item.name) +
           ' (' +
@@ -278,6 +279,7 @@
           '/' +
           item.timeSignatureDen +
           ')' +
+          '</div>' +
           '<div class="listActions">' +
           '<button type="button" class="setlistSelectBtn" data-song-id="' +
           item.songId +
@@ -297,7 +299,7 @@
           '<button type="button" class="setlistRemoveBtn" data-song-id="' +
           item.songId +
           '">Remove</button>' +
-          '<a href="editor.php?songId=' +
+          '<a class="setlistEditBtn" href="editor.php?songId=' +
           item.songId +
           '">Edit song</a>' +
           '</div>' +
@@ -536,13 +538,11 @@
           '</div>' +
           '<div class="timelineSectionColumns">' +
           '<div class="timelineSectionColumn timelineSectionColumnShared">' +
-          '<div class="timelineSectionColumnLabel">Shared</div>' +
           '<div class="timelineSectionText">' +
           escapeHtml(section.sharedText || '') +
           '</div>' +
           '</div>' +
           '<div class="timelineSectionColumn timelineSectionColumnPrivate">' +
-          '<div class="timelineSectionColumnLabel">Private</div>' +
           '<div class="timelineSectionText">' +
           escapeHtml(section.privateText || '') +
           '</div>' +

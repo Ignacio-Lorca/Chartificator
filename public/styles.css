@@ -439,6 +439,47 @@ li {
   min-height: 32px;
 }
 
+#setlistList li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.setlistItemMeta {
+  flex: 1 1 auto;
+  min-width: 220px;
+}
+
+#setlistList .listActions {
+  margin-top: 0;
+  margin-left: auto;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+}
+
+#setlistList .setlistEditBtn {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  min-height: 36px;
+  padding: 8px 14px;
+  background: linear-gradient(180deg, var(--accent), var(--accent-strong));
+  color: var(--button-text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 10px 20px rgba(85, 105, 200, 0.18);
+  transition: transform 140ms ease, box-shadow 140ms ease, filter 140ms ease, opacity 140ms ease;
+  text-decoration: none;
+}
+
+#setlistList .setlistEditBtn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 26px rgba(85, 105, 200, 0.22);
+  text-decoration: none;
+}
+
 .sectionColorSwatch {
   display: inline-block;
   width: 10px;
@@ -605,21 +646,6 @@ li {
   gap: 4px;
 }
 
-.timelineSectionColumnLabel {
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1.2;
-  opacity: 0.85;
-}
-
-.timelineSectionColumnShared .timelineSectionColumnLabel {
-  color: var(--heading);
-}
-
-.timelineSectionColumnPrivate .timelineSectionColumnLabel {
-  color: var(--accent-strong);
-}
-
 .timelineSectionText {
   font-size: 13px;
   font-weight: 600;
@@ -731,6 +757,17 @@ li {
   .transportRow input {
     min-width: 84px;
     max-width: 98px;
+  }
+
+  #setlistList li {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  #setlistList .listActions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
   }
 
   .timelineTrack {
