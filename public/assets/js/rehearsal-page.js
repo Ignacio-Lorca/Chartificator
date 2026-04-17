@@ -3,6 +3,7 @@
   var escapeHtml = window.SharedChartsApi.escapeHtml;
   var computeBarNow = window.SharedChartsApi.computeBarNow;
   var requireAuth = window.SharedChartsAuth.requireAuth;
+  var toast = window.SharedChartsToast;
 
   var el = function (id) {
     return document.getElementById(id);
@@ -45,10 +46,21 @@
     visualRafId: null,
     noteEditorBar: null,
     noteEditorSaving: false,
+    navActionInFlight: false,
+    transportActionInFlight: false,
   };
 
   function setStatus(id, text) {
     el(id).textContent = text;
+    if (id === 'pageStatus' && toast && typeof toast.show === 'function' && text) {
+      toast.show(text, 'info');
+    }
+  }
+
+  function notify(message, type) {
+    if (toast && typeof toast.show === 'function') {
+      toast.show(message, type || 'info');
+    }
   }
 
   function closeTimelineNoteEditor() {
@@ -98,21 +110,101 @@
       var barNumber = state.noteEditorBar;
       var sharedText = el('timelineSharedNoteInput') ? el('timelineSharedNoteInput').value : '';
       var privateText = el('timelinePrivateNoteInput') ? el('timelinePrivateNoteInput').value : '';
-      await api('bar-note-shared-upsert.php', 'POST', {
-        songId: state.songId,
-        barNumber: barNumber,
-        noteText: sharedText,
-      });
-      await api('bar-note-private-upsert.php', 'POST', {
-        songId: state.songId,
-        barNumber: barNumber,
-        noteText: privateText,
-      });
-      await refreshSongContent();
-      closeTimelineNoteEditor();
-      setStatus('pageStatus', 'Notes saved for bar ' + barNumber + '.');
+      var sharedOk = false;
+      var privateOk = false;
+      var sharedErr = null;
+      var privateErr = null;
+
+      try {
+        var sharedResult = await api('bar-note-shared-upsert.php', 'POST', {
+          songId: state.songId,
+          barNumber: barNumber,
+          noteText: sharedText,
+        });
+        sharedOk = true;
+        if (
+          sharedResult &&
+          Number(sharedResult.movedFromBarNumber) > 0 &&
+          Number(sharedResult.movedToBarNumber) > 0 &&
+          Number(sharedResult.movedFromBarNumber) !== Number(sharedResult.movedToBarNumber)
+        ) {
+          notify(
+            'Shared note moved from bar ' +
+              sharedResult.movedFromBarNumber +
+              ' to bar ' +
+              sharedResult.movedToBarNumber +
+              '.',
+            'info'
+          );
+        }
+      } catch (err) {
+        sharedErr = err;
+      }
+
+      try {
+        var privateResult = await api('bar-note-private-upsert.php', 'POST', {
+          songId: state.songId,
+          barNumber: barNumber,
+          noteText: privateText,
+        });
+        privateOk = true;
+        if (
+          privateResult &&
+          Number(privateResult.movedFromBarNumber) > 0 &&
+          Number(privateResult.movedToBarNumber) > 0 &&
+          Number(privateResult.movedFromBarNumber) !== Number(privateResult.movedToBarNumber)
+        ) {
+          notify(
+            'Private note moved from bar ' +
+              privateResult.movedFromBarNumber +
+              ' to bar ' +
+              privateResult.movedToBarNumber +
+              '.',
+            'info'
+          );
+        }
+      } catch (err) {
+        privateErr = err;
+      }
+
+      if (sharedOk || privateOk) {
+        await refreshSongContent();
+      }
+
+      if (sharedOk && privateOk) {
+        closeTimelineNoteEditor();
+        notify('Shared and private notes saved for bar ' + barNumber + '.', 'success');
+        return;
+      }
+      if (sharedOk && !privateOk) {
+        closeTimelineNoteEditor();
+        notify(
+          'Shared note saved, private failed: ' + ((privateErr && privateErr.message) || 'Unknown error'),
+          'error'
+        );
+        return;
+      }
+      if (!sharedOk && privateOk) {
+        closeTimelineNoteEditor();
+        notify(
+          'Private note saved, shared failed: ' + ((sharedErr && sharedErr.message) || 'Unknown error'),
+          'error'
+        );
+        return;
+      }
+
+      notify(
+        'Saving failed. Shared: ' +
+          ((sharedErr && sharedErr.message) || 'Unknown error') +
+          ' | Private: ' +
+          ((privateErr && privateErr.message) || 'Unknown error'),
+        'error'
+      );
+      if (el('timelineNoteSaveBtn')) {
+        el('timelineNoteSaveBtn').disabled = false;
+      }
     } catch (err) {
-      setStatus('pageStatus', err.message || String(err));
+      notify(err.message || String(err), 'error');
       if (el('timelineNoteSaveBtn')) {
         el('timelineNoteSaveBtn').disabled = false;
       }
@@ -576,7 +668,50 @@
     if (!state.sessionId || !state.songId) {
       return;
     }
+    await syncSessionSongSelection();
     await refreshSongContent();
+  }
+
+  async function syncSessionSongSelection() {
+    if (!state.sessionId) {
+      return;
+    }
+    var snapshot = await api(
+      'session-snapshot.php?sessionId=' + encodeURIComponent(String(state.sessionId))
+    );
+    var nextSongId = snapshot.songId ? Number(snapshot.songId) : null;
+    var songChanged = nextSongId !== state.songId;
+    state.songId = nextSongId;
+    state.activeSong = snapshot.activeSong || null;
+    state.setlist = snapshot.setlist || [];
+    if (songChanged) {
+      state.sections = snapshot.sections || [];
+      state.sharedNotes = snapshot.sharedNotes || [];
+      state.privateNotes = snapshot.privateNotes || [];
+      state.contentFreshForSongId = state.songId;
+      if (window.history && window.history.replaceState) {
+        var nextUrl = 'rehearsal.php?sessionId=' + state.sessionId;
+        if (state.songId) {
+          nextUrl += '&songId=' + state.songId;
+        }
+        window.history.replaceState({}, '', nextUrl);
+      }
+      if (el('editorLink')) {
+        el('editorLink').href = state.songId ? 'editor.php?songId=' + state.songId : 'songs.php';
+        el('editorLink').textContent = state.songId ? 'Open notes editor for current song' : 'Choose a song first';
+      }
+      renderSectionsList();
+      renderNotesLists();
+      buildTimelineBars();
+      renderTimelineRows();
+      if (el('endOfSongPrompt')) {
+        el('endOfSongPrompt').classList.add('hidden');
+      }
+      state.endPromptShownForSongId = null;
+      state.autoPauseRequestedForSongId = null;
+    }
+    renderSetlist();
+    renderTransport();
   }
 
   function startContentPolling() {
@@ -837,6 +972,8 @@
     await refreshSnapshot();
     await refreshSongContent();
     await refreshMembers();
+    await updateTransport('pause');
+    await seekToSongStart();
   }
 
   async function addSongToSetlist(songId) {
@@ -929,7 +1066,6 @@
     }
     var next = state.setlist[currentIndex + 1];
     await selectActiveSong(Number(next.songId));
-    await replayCurrentSong();
   }
 
   async function playPreviousSong() {
@@ -941,7 +1077,6 @@
     }
     var previous = state.setlist[currentIndex - 1];
     await selectActiveSong(Number(previous.songId));
-    await replayCurrentSong();
   }
 
   function isTypingTarget(node) {
@@ -955,36 +1090,109 @@
       if (!state.sessionId || isTypingTarget(event.target)) {
         return;
       }
+      if (event.repeat) {
+        return;
+      }
       if (event.code === 'Space') {
         event.preventDefault();
+        if (state.transportActionInFlight) {
+          return;
+        }
         var action =
           state.transport && state.transport.playState === 'playing'
             ? 'pause'
             : 'play';
-        updateTransport(action).catch(function (e) {
-          setStatus('transportInfo', e.message || String(e));
-        });
+        state.transportActionInFlight = true;
+        updateTransport(action)
+          .catch(function (e) {
+            setStatus('transportInfo', e.message || String(e));
+            notify(e.message || String(e), 'error');
+          })
+          .finally(function () {
+            state.transportActionInFlight = false;
+          });
         return;
       }
       if (event.code === 'ArrowRight') {
         event.preventDefault();
-        playNextSong().catch(function (e) {
-          setStatus('pageStatus', e.message || String(e));
-        });
+        if (state.navActionInFlight) {
+          return;
+        }
+        state.navActionInFlight = true;
+        playNextSong()
+          .catch(function (e) {
+            setStatus('pageStatus', e.message || String(e));
+          })
+          .finally(function () {
+            state.navActionInFlight = false;
+          });
         return;
       }
       if (event.code === 'ArrowLeft') {
         event.preventDefault();
-        playPreviousSong().catch(function (e) {
-          setStatus('pageStatus', e.message || String(e));
-        });
+        if (state.navActionInFlight) {
+          return;
+        }
+        state.navActionInFlight = true;
+        playPreviousSong()
+          .catch(function (e) {
+            setStatus('pageStatus', e.message || String(e));
+          })
+          .finally(function () {
+            state.navActionInFlight = false;
+          });
+        return;
+      }
+      if (event.code === 'ArrowUp') {
+        event.preventDefault();
+        if (!state.transport || state.transportActionInFlight) {
+          return;
+        }
+        var currentBarUp = Math.max(1, Math.floor(computeBarNow(state.transport)));
+        var previousBar = Math.max(1, currentBarUp - 1);
+        state.transportActionInFlight = true;
+        updateTransport('seekBar', { bar: previousBar })
+          .catch(function (e) {
+            setStatus('transportInfo', e.message || String(e));
+            notify(e.message || String(e), 'error');
+          })
+          .finally(function () {
+            state.transportActionInFlight = false;
+          });
+        return;
+      }
+      if (event.code === 'ArrowDown') {
+        event.preventDefault();
+        if (!state.transport || state.transportActionInFlight) {
+          return;
+        }
+        var currentBarDown = Math.max(1, Math.floor(computeBarNow(state.transport)));
+        var nextBar = currentBarDown + 1;
+        state.transportActionInFlight = true;
+        updateTransport('seekBar', { bar: nextBar })
+          .catch(function (e) {
+            setStatus('transportInfo', e.message || String(e));
+            notify(e.message || String(e), 'error');
+          })
+          .finally(function () {
+            state.transportActionInFlight = false;
+          });
         return;
       }
       if (event.code === 'Home') {
         event.preventDefault();
-        seekToSongStart().catch(function (e) {
-          setStatus('transportInfo', e.message || String(e));
-        });
+        if (state.transportActionInFlight) {
+          return;
+        }
+        state.transportActionInFlight = true;
+        seekToSongStart()
+          .catch(function (e) {
+            setStatus('transportInfo', e.message || String(e));
+            notify(e.message || String(e), 'error');
+          })
+          .finally(function () {
+            state.transportActionInFlight = false;
+          });
       }
     });
   }
@@ -1046,26 +1254,31 @@
     el('playBtn').addEventListener('click', function () {
       updateTransport('play').catch(function (e) {
         setStatus('transportInfo', e.message);
+        notify(e.message || String(e), 'error');
       });
     });
     el('pauseBtn').addEventListener('click', function () {
       updateTransport('pause').catch(function (e) {
         setStatus('transportInfo', e.message);
+        notify(e.message || String(e), 'error');
       });
     });
     el('songStartBtn').addEventListener('click', function () {
       seekToSongStart().catch(function (e) {
         setStatus('transportInfo', e.message);
+        notify(e.message || String(e), 'error');
       });
     });
     el('seekBtn').addEventListener('click', function () {
       updateTransport('seekBar', { bar: Number(el('seekBar').value) }).catch(function (e) {
         setStatus('transportInfo', e.message);
+        notify(e.message || String(e), 'error');
       });
     });
     el('setBpmBtn').addEventListener('click', function () {
       updateTransport('setBpm', { bpm: Number(el('setBpm').value) }).catch(function (e) {
         setStatus('transportInfo', e.message);
+        notify(e.message || String(e), 'error');
       });
     });
     if (el('addSongBtn')) {
@@ -1127,10 +1340,6 @@
       });
     }
   }
-
-  setInterval(function () {
-    renderTransport();
-  }, 250);
 
   init();
 })();

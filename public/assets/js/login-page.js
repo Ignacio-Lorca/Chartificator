@@ -1,8 +1,15 @@
 (function () {
   var api = window.SharedChartsApi.api;
+  var toast = window.SharedChartsToast;
   var el = function (id) {
     return document.getElementById(id);
   };
+
+  function notify(message, type) {
+    if (toast && typeof toast.show === 'function') {
+      toast.show(message, type || 'info');
+    }
+  }
 
   async function boot() {
     try {
@@ -41,10 +48,12 @@
         return;
       }
       el('authStatus').textContent = 'Logging in...';
+      notify('Logging in...', 'info');
       await api('auth-login.php', 'POST', { displayName: displayName });
       window.location.href = 'songs.php';
     } catch (err) {
       el('authStatus').textContent = err.message || String(err);
+      notify(err.message || String(err), 'error');
     }
   });
 

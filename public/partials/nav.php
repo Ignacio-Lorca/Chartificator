@@ -15,3 +15,4 @@ $current = $current ?? '';
     <button type="button" id="logoutBtn" class="navButton">Logout</button>
   </div>
 </nav>
+<div id="appToastRoot" class="appToastRoot" aria-live="polite" aria-atomic="true"></div>

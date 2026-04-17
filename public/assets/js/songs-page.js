@@ -1,9 +1,16 @@
 (function () {
   var api = window.SharedChartsApi.api;
   var requireAuth = window.SharedChartsAuth.requireAuth;
+  var toast = window.SharedChartsToast;
   var el = function (id) {
     return document.getElementById(id);
   };
+
+  function notify(message, type) {
+    if (toast && typeof toast.show === 'function') {
+      toast.show(message, type || 'info');
+    }
+  }
 
   function qs(name) {
     var m = new RegExp('[?&]' + name + '=([^&]*)').exec(window.location.search);
@@ -61,6 +68,7 @@
         await loadSongIntoForm(songIdParam);
       } catch (e) {
         el('songInfo').textContent = e.message || String(e);
+        notify(e.message || String(e), 'error');
       }
     }
 
@@ -75,10 +83,12 @@
           timeSignatureDen: Number(el('songSigDen').value),
         });
         el('songInfo').textContent = 'Song created (ID ' + data.songId + ')';
+        notify('Song created (ID ' + data.songId + ')', 'success');
         window.history.replaceState({}, '', 'songs.php?songId=' + data.songId);
         await loadSongList();
       } catch (err) {
         el('songInfo').textContent = err.message || String(err);
+        notify(err.message || String(err), 'error');
       }
     });
 
@@ -94,9 +104,11 @@
           timeSignatureDen: Number(el('songSigDen').value),
         });
         el('songInfo').textContent = 'Song ' + sid + ' updated';
+        notify('Song ' + sid + ' updated.', 'success');
         await loadSongList();
       } catch (err) {
         el('songInfo').textContent = err.message || String(err);
+        notify(err.message || String(err), 'error');
       }
     });
 
@@ -109,10 +121,12 @@
           name: el('sessionName').value || 'Rehearsal Session',
         });
         el('inviteOut').textContent = 'Rehearsal created.';
+        notify('Rehearsal created. Opening session...', 'success');
         window.location.href =
           'rehearsal.php?sessionId=' + data.sessionId + '&songId=' + sid;
       } catch (err) {
         el('sessionInfo').textContent = err.message || String(err);
+        notify(err.message || String(err), 'error');
       }
     });
   }

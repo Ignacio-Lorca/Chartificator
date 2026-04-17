@@ -620,6 +620,63 @@ li {
   max-width: 760px;
 }
 
+.appToastRoot {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 24px));
+  pointer-events: none;
+}
+
+.appToast {
+  pointer-events: auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-strong);
+  color: var(--text);
+  box-shadow: var(--shadow-small);
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.35;
+  animation: toastEnter 140ms ease-out;
+}
+
+.appToastSuccess {
+  border-color: color-mix(in srgb, #4ab77d 42%, var(--border) 58%);
+  background: color-mix(in srgb, #e8fff3 72%, var(--surface-strong) 28%);
+}
+
+.appToastError {
+  border-color: color-mix(in srgb, #e06f6f 44%, var(--border) 56%);
+  background: color-mix(in srgb, #fff0f0 72%, var(--surface-strong) 28%);
+}
+
+.appToastInfo {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border) 64%);
+  background: color-mix(in srgb, var(--accent-soft) 40%, var(--surface-strong) 60%);
+}
+
+.appToastExit {
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+@keyframes toastEnter {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (max-width: 760px) {
   .grid2 {
     grid-template-columns: 1fr;
@@ -651,5 +708,12 @@ li {
   .timelineNow {
     left: 8px;
     right: 8px;
+  }
+
+  .appToastRoot {
+    right: 10px;
+    left: 10px;
+    top: 10px;
+    max-width: none;
   }
 }

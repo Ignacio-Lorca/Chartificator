@@ -2,10 +2,17 @@
   var api = window.SharedChartsApi.api;
   var escapeHtml = window.SharedChartsApi.escapeHtml;
   var requireAuth = window.SharedChartsAuth.requireAuth;
+  var toast = window.SharedChartsToast;
 
   var el = function (id) {
     return document.getElementById(id);
   };
+
+  function notify(message, type) {
+    if (toast && typeof toast.show === 'function') {
+      toast.show(message, type || 'info');
+    }
+  }
 
   function qs(name) {
     var m = new RegExp('[?&]' + name + '=([^&]*)').exec(window.location.search);
@@ -178,8 +185,9 @@
               Number(button.getAttribute('data-section-id')),
               button.getAttribute('data-direction')
             );
+            notify('Section moved.', 'success');
           } catch (err) {
-            alert(err.message || String(err));
+            notify(err.message || String(err), 'error');
           }
         });
       }
@@ -190,8 +198,9 @@
         button.addEventListener('click', async function () {
           try {
             await deleteSection(Number(button.getAttribute('data-section-id')));
+            notify('Section deleted.', 'success');
           } catch (err) {
-            alert(err.message || String(err));
+            notify(err.message || String(err), 'error');
           }
         });
       }
@@ -206,6 +215,7 @@
     sessionId = parseInt(qs('sessionId'), 10);
     if (!(songId > 0)) {
       el('editorStatus').textContent = 'Open this page with ?songId= or use the Songs/Rehearsal pages.';
+      notify('Open this page with a valid song first.', 'error');
       return;
     }
 
@@ -226,6 +236,7 @@
       await refreshNotesAndSections();
     } catch (e) {
       el('editorStatus').textContent = e.message || String(e);
+      notify(e.message || String(e), 'error');
       return;
     }
 
@@ -233,22 +244,32 @@
       try {
         var nextBar = Number(el('noteBar').value);
         var originalBar = Number(el('sharedOriginalBar').value);
-        await api('bar-note-shared-upsert.php', 'POST', {
+        var sharedResult = await api('bar-note-shared-upsert.php', 'POST', {
           songId: songId,
           barNumber: nextBar,
+          originalBarNumber: originalBar > 0 ? originalBar : undefined,
           noteText: el('sharedNote').value,
         });
-        if (originalBar > 0 && originalBar !== nextBar) {
-          await api('bar-note-shared-upsert.php', 'POST', {
-            songId: songId,
-            barNumber: originalBar,
-            noteText: '',
-          });
-        }
         clearNoteForm('shared');
         await refreshNotesAndSections();
+        if (
+          sharedResult &&
+          Number(sharedResult.movedFromBarNumber) > 0 &&
+          Number(sharedResult.movedToBarNumber) > 0 &&
+          Number(sharedResult.movedFromBarNumber) !== Number(sharedResult.movedToBarNumber)
+        ) {
+          notify(
+            'Shared note moved from bar ' +
+              sharedResult.movedFromBarNumber +
+              ' to bar ' +
+              sharedResult.movedToBarNumber +
+              '.',
+            'info'
+          );
+        }
+        notify('Shared note saved.', 'success');
       } catch (err) {
-        alert(err.message || String(err));
+        notify(err.message || String(err), 'error');
       }
     });
 
@@ -256,22 +277,32 @@
       try {
         var nextBar = Number(el('noteBar').value);
         var originalBar = Number(el('privateOriginalBar').value);
-        await api('bar-note-private-upsert.php', 'POST', {
+        var privateResult = await api('bar-note-private-upsert.php', 'POST', {
           songId: songId,
           barNumber: nextBar,
+          originalBarNumber: originalBar > 0 ? originalBar : undefined,
           noteText: el('privateNote').value,
         });
-        if (originalBar > 0 && originalBar !== nextBar) {
-          await api('bar-note-private-upsert.php', 'POST', {
-            songId: songId,
-            barNumber: originalBar,
-            noteText: '',
-          });
-        }
         clearNoteForm('private');
         await refreshNotesAndSections();
+        if (
+          privateResult &&
+          Number(privateResult.movedFromBarNumber) > 0 &&
+          Number(privateResult.movedToBarNumber) > 0 &&
+          Number(privateResult.movedFromBarNumber) !== Number(privateResult.movedToBarNumber)
+        ) {
+          notify(
+            'Private note moved from bar ' +
+              privateResult.movedFromBarNumber +
+              ' to bar ' +
+              privateResult.movedToBarNumber +
+              '.',
+            'info'
+          );
+        }
+        notify('Private note saved.', 'success');
       } catch (err) {
-        alert(err.message || String(err));
+        notify(err.message || String(err), 'error');
       }
     });
     el('clearSharedNoteBtn').addEventListener('click', function () {
@@ -293,8 +324,9 @@
         });
         clearSectionForm();
         await refreshNotesAndSections();
+        notify('Section saved.', 'success');
       } catch (err) {
-        alert(err.message || String(err));
+        notify(err.message || String(err), 'error');
       }
     });
     el('clearSectionBtn').addEventListener('click', function () {

@@ -11,11 +11,15 @@ $data = json_input();
 
 $songId = (int) ($data['songId'] ?? 0);
 $barNumber = (int) ($data['barNumber'] ?? 0);
+$originalBarNumber = (int) ($data['originalBarNumber'] ?? 0);
 $noteText = sanitize_note_text((string) ($data['noteText'] ?? ''));
 if ($songId <= 0) {
     json_error('songId is required');
 }
 validate_bar_number($barNumber);
+if ($originalBarNumber > 0) {
+    validate_bar_number($originalBarNumber);
+}
 if (app_strlen($noteText) > 2000) {
     json_error('Note too long');
 }
@@ -38,6 +42,58 @@ $existingStmt->execute([
 
 $pdo->beginTransaction();
 try {
+    if ($originalBarNumber > 0 && $originalBarNumber !== $barNumber) {
+        if ($noteText === '') {
+            $deleteOriginalStmt = $pdo->prepare(
+                'DELETE FROM bar_notes
+                 WHERE song_id = :song_id
+                   AND layer_type = "shared"
+                   AND bar_number = :original_bar_number'
+            );
+            $deleteOriginalStmt->execute([
+                'song_id' => $songId,
+                'original_bar_number' => $originalBarNumber,
+            ]);
+            $pdo->commit();
+            json_ok([
+                'songId' => $songId,
+                'barNumber' => $originalBarNumber,
+                'movedFromBarNumber' => $originalBarNumber,
+                'movedToBarNumber' => null,
+            ]);
+        }
+
+        $moveUpsertStmt = $pdo->prepare(
+            'INSERT INTO bar_notes (song_id, bar_number, layer_type, owner_user_id, note_text)
+             VALUES (:song_id, :bar_number, "shared", NULL, :note_text)
+             ON DUPLICATE KEY UPDATE note_text = VALUES(note_text), updated_at = CURRENT_TIMESTAMP'
+        );
+        $moveUpsertStmt->execute([
+            'song_id' => $songId,
+            'bar_number' => $barNumber,
+            'note_text' => $noteText,
+        ]);
+
+        $deleteOriginalStmt = $pdo->prepare(
+            'DELETE FROM bar_notes
+             WHERE song_id = :song_id
+               AND layer_type = "shared"
+               AND bar_number = :original_bar_number'
+        );
+        $deleteOriginalStmt->execute([
+            'song_id' => $songId,
+            'original_bar_number' => $originalBarNumber,
+        ]);
+
+        $pdo->commit();
+        json_ok([
+            'songId' => $songId,
+            'barNumber' => $barNumber,
+            'movedFromBarNumber' => $originalBarNumber,
+            'movedToBarNumber' => $barNumber,
+        ]);
+    }
+
     if ($noteText === '') {
         $deleteStmt = $pdo->prepare(
             'DELETE FROM bar_notes

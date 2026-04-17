@@ -73,6 +73,7 @@
   </main>
   <script src="assets/js/api-client.js"></script>
   <script src="assets/js/auth.js"></script>
+  <script src="assets/js/toast.js"></script>
   <script src="assets/js/editor-page.js"></script>
 </body>
 </html>
