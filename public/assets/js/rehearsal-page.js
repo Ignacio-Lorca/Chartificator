@@ -46,6 +46,8 @@
     noteEditorSaving: false,
     navActionInFlight: false,
     transportActionInFlight: false,
+    heartbeatTimerId: null,
+    heartbeatIntervalMs: 15000,
   };
 
   function setStatus(id, text) {
@@ -322,19 +324,60 @@
   }
 
   function renderMembers() {
-    if (!el('membersList')) return;
-    el('membersList').innerHTML = state.members
-      .map(function (member) {
-        var current = state.currentUser && Number(state.currentUser.userId) === Number(member.userId);
-        return '<li>' + escapeHtml(member.displayName) + (current ? ' (you)' : '') + '</li>';
-      })
-      .join('');
+    if (el('membersList')) {
+      el('membersList').innerHTML = '';
+    }
     if (el('membersInfo')) {
+      var names = state.members.map(function (member) {
+        var current = state.currentUser && Number(state.currentUser.userId) === Number(member.userId);
+        return member.displayName + (current ? ' (you)' : '');
+      });
       el('membersInfo').textContent =
         state.members.length > 0
-          ? 'Users in rehearsal: ' + state.members.length
-          : 'No users currently shown.';
+          ? 'Users online now (' + state.members.length + '): ' + names.join('; ')
+          : 'Users online now (0)';
     }
+  }
+
+  async function sendPresenceHeartbeat(silent) {
+    if (!state.sessionId) return;
+    try {
+      await api('session-presence-heartbeat.php', 'POST', {
+        sessionId: state.sessionId,
+      });
+    } catch (err) {
+      if (!silent) {
+        notify('Presence sync failed: ' + (err.message || String(err)), 'warning');
+      }
+    }
+  }
+
+  function stopHeartbeatLoop() {
+    if (state.heartbeatTimerId) {
+      clearTimeout(state.heartbeatTimerId);
+      state.heartbeatTimerId = null;
+    }
+  }
+
+  function startHeartbeatLoop() {
+    stopHeartbeatLoop();
+    var tick = function () {
+      sendPresenceHeartbeat(true).finally(function () {
+        state.heartbeatTimerId = setTimeout(tick, state.heartbeatIntervalMs);
+      });
+    };
+    state.heartbeatTimerId = setTimeout(tick, state.heartbeatIntervalMs);
+  }
+
+  function wirePresenceLifecycle() {
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') {
+        sendPresenceHeartbeat(true);
+      }
+    });
+    window.addEventListener('beforeunload', function () {
+      stopHeartbeatLoop();
+    });
   }
 
   function renderAvailableSongs() {
@@ -975,6 +1018,7 @@
     });
     if (state.sessionId === sessionId) {
       if (state.pollingId) clearTimeout(state.pollingId);
+      stopHeartbeatLoop();
       state.sessionId = null;
       state.songId = null;
       state.activeSong = null;
@@ -1198,13 +1242,16 @@
     setSessionContentVisible(true);
 
     await joinSession(state.sessionId);
+    await sendPresenceHeartbeat(true);
     await refreshSnapshot();
     await refreshSongContent();
     await refreshMembers();
     await loadRehearsals();
     startPolling();
     startContentPolling();
+    startHeartbeatLoop();
     startVisualLoop();
+    wirePresenceLifecycle();
     wireKeyboardShortcuts();
 
     el('playBtn').addEventListener('click', function () {

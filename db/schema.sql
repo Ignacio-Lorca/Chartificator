@@ -58,6 +58,18 @@ CREATE TABLE IF NOT EXISTS session_memberships (
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
+CREATE TABLE IF NOT EXISTS session_presence (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  session_id BIGINT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  display_name VARCHAR(64) NOT NULL,
+  last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_session_presence_user (session_id, user_id),
+  KEY idx_session_presence_last_seen (session_id, last_seen_at),
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS song_sections (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   song_id BIGINT UNSIGNED NOT NULL,
@@ -89,6 +101,7 @@ CREATE TABLE IF NOT EXISTS song_section_private_notes (
 -- CREATE TABLE song_section_private_notes (...);
 -- ALTER TABLE sessions ADD COLUMN active_song_id BIGINT UNSIGNED NULL AFTER song_id;
 -- CREATE TABLE session_songs (...);
+-- CREATE TABLE session_presence (...);
 -- INSERT INTO session_songs (session_id, song_id, sort_order)
 -- SELECT id, COALESCE(active_song_id, song_id), 0 FROM sessions;
 -- UPDATE sessions SET active_song_id = COALESCE(active_song_id, song_id);

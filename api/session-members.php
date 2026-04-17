@@ -14,13 +14,22 @@ if ($sessionId <= 0) {
 $pdo = db();
 ensure_session_membership($pdo, $sessionId, $userId);
 
+const ONLINE_TIMEOUT_SECONDS = 45;
+
 $stmt = $pdo->prepare(
-    'SELECT user_id AS userId, display_name AS displayName, joined_at AS joinedAt
-     FROM session_memberships
-     WHERE session_id = :session_id
-     ORDER BY joined_at ASC, id ASC'
+    'SELECT m.user_id AS userId, m.display_name AS displayName, m.joined_at AS joinedAt
+     FROM session_memberships m
+     INNER JOIN session_presence p
+             ON p.session_id = m.session_id
+            AND p.user_id = m.user_id
+     WHERE m.session_id = :session_id
+       AND TIMESTAMPDIFF(SECOND, p.last_seen_at, CURRENT_TIMESTAMP) <= :timeout_seconds
+     ORDER BY p.last_seen_at DESC, m.joined_at ASC, m.id ASC'
 );
-$stmt->execute(['session_id' => $sessionId]);
+$stmt->execute([
+    'session_id' => $sessionId,
+    'timeout_seconds' => ONLINE_TIMEOUT_SECONDS,
+]);
 
 json_ok([
     'sessionId' => $sessionId,

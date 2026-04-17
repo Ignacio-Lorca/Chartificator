@@ -50,7 +50,6 @@
         </div>
         <div id="setlistPanelBody" class="panelBody">
           <p id="membersInfo" class="muted"></p>
-          <ul id="membersList" class="memberList"></ul>
           <div class="row compactRow">
             <select id="addSongSelect">
               <option value="">Select song to add</option>
